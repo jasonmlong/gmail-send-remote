@@ -1,8 +1,9 @@
 # Brief for the agent administering the OpenClaw host
 
 Hand this to the agent that manages the OpenClaw server. It is written to be
-pasted as a task prompt. The full human runbook is `docs/OPENCLAW-SETUP.md`;
-this is the host half of it, with the Google-side work already done.
+pasted as a task prompt. The full human runbook is
+`/srv/gmail-send/docs/OPENCLAW-SETUP.md` once the repository is cloned; this is
+the host half of it, with the Google-side work already done.
 
 ---
 
@@ -30,8 +31,12 @@ fixed when it was minted.
 - Canonical checkout on the owner's workstation:
   `C:\Users\jason\Documents\GitHub\gmail-send-remote` (where changes originate;
   you do not need it, it is named so you know where the source of truth lives)
-- Install path on this host: `/srv/gmail-send` (adjust if this host has a
-  different convention, and use the real path consistently everywhere below)
+- Install path on this host: `/srv/gmail-send`
+
+Every path below is absolute and assumes that install directory. If this host
+uses a different convention, substitute your directory in **all** of them,
+including the two `--arg` values in the OpenClaw registration, and say in your
+report which path you used.
 
 ## What you will be given, out of band
 
@@ -48,7 +53,7 @@ password:
 
 - Never echo it to stdout, never include it in a log line, a commit, a summary
   or a message back to anyone.
-- It belongs in exactly one file: `.env` in the install directory, mode `600`.
+- It belongs in exactly one file, `/srv/gmail-send/.env`, mode `600`.
 - Do not copy it into the OpenClaw config, a systemd unit, a shell history, an
   environment variable in a shared profile, or a secrets note "for
   convenience".
@@ -93,12 +98,11 @@ suite.
 ### 2. Configure
 
 ```bash
-cd /srv/gmail-send
-cp .env.openclaw.example .env
-chmod 600 .env
+cp /srv/gmail-send/.env.openclaw.example /srv/gmail-send/.env
+chmod 600 /srv/gmail-send/.env
 ```
 
-Edit `.env` and fill in only these two values:
+Edit `/srv/gmail-send/.env` and fill in only these two values:
 
 ```
 GMAIL_SEND_APPS_SCRIPT_URL=<the /exec URL>
@@ -114,25 +118,33 @@ Leave everything else exactly as the template has it. In particular:
   calendar timezone, which is what the attribution line in a reply must use.
   Setting it to this server's timezone puts the wrong time in every quoted
   reply.
-- `GMAIL_SEND_STYLE_GUIDE=./config/style-guide.md` stays as it is. That file is
+- `GMAIL_SEND_STYLE_GUIDE` must resolve to
+  `/srv/gmail-send/config/style-guide.md`. The template ships the relative form
+  `./config/style-guide.md`, which resolves against the repository root and
+  works; set it to the absolute path if you prefer it unambiguous. That file is
   in the repository and carries the owner's writing voice. Without it the tools
   fall back to a generic summary and drafts stop sounding like him.
 
 Then tighten the working directories, which hold mail in the clear:
 
 ```bash
-chmod 700 .gmail-sim preview 2>/dev/null || true
+chmod 700 /srv/gmail-send/.gmail-sim /srv/gmail-send/preview 2>/dev/null || true
 ```
 
-`.gmail-sim/appsscript-draft-meta.json` caches the rendered text and raw MIME
-of every draft staged from here, and it outlives both deleting the draft in
-Gmail and revoking the token. Treat that directory the way you treat `.env`.
+`/srv/gmail-send/.gmail-sim/appsscript-draft-meta.json` caches the rendered
+text and raw MIME of every draft staged from here, and it outlives both
+deleting the draft in Gmail and revoking the token. Treat that directory the
+way you treat `/srv/gmail-send/.env`.
 
 ### 3. Verify before registering
 
 ```bash
 cd /srv/gmail-send && npm run cli -- profile
 ```
+
+(`npm run` resolves scripts from the package root, so these commands are run
+from `/srv/gmail-send`. Keep the `cd` rather than assuming a working
+directory.)
 
 Read the output rather than glancing at it. Required:
 
@@ -150,15 +162,25 @@ revoked. If `email` is not the expected mailbox, stop.
 Then confirm reads work:
 
 ```bash
-npm run cli -- threads --max 3      # should list conversations
-npm run cli -- signatures list      # should show the Gmail signature, tagged [gmail]
+cd /srv/gmail-send && npm run cli -- threads --max 3      # should list conversations
+cd /srv/gmail-send && npm run cli -- signatures list      # should show the Gmail signature, tagged [gmail]
 ```
 
 ### 4. Register with OpenClaw
 
+First resolve the interpreter. OpenClaw may run under a different `PATH` than
+your shell, and a bare `node` (or a version-manager shim that only exists in an
+interactive shell) then fails to start with no useful error:
+
+```bash
+command -v node        # e.g. /usr/bin/node or /usr/local/bin/node
+```
+
+Use that absolute path below in place of `/usr/bin/node` if it differs.
+
 ```bash
 openclaw mcp add gmail-send \
-  --command node \
+  --command /usr/bin/node \
   --arg /srv/gmail-send/node_modules/tsx/dist/cli.mjs \
   --arg /srv/gmail-send/src/mcp/server.ts \
   --cwd /srv/gmail-send \
@@ -172,7 +194,7 @@ Equivalent config under `mcp.servers`, if you configure by file instead:
   mcp: {
     servers: {
       "gmail-send": {
-        command: "node",
+        command: "/usr/bin/node",
         args: [
           "/srv/gmail-send/node_modules/tsx/dist/cli.mjs",
           "/srv/gmail-send/src/mcp/server.ts",
@@ -189,11 +211,13 @@ Equivalent config under `mcp.servers`, if you configure by file instead:
 
 Two things to get right:
 
+- The command is the absolute `node` path from `command -v node`, never the
+  bare name.
 - `node` invokes `tsx` directly rather than through `npx`. Keep it that way.
-- The URL and token stay in `.env` and are **not** repeated in the OpenClaw
-  config, so the credential lives in one file.
+- The URL and token stay in `/srv/gmail-send/.env` and are **not** repeated in
+  the OpenClaw config, so the credential lives in one file.
 
-Note that `.mcp.json` in the repository is for a different client and pins the
+Note that `/srv/gmail-send/.mcp.json` is for a different client and pins the
 offline simulator. It has no effect here. Leave it alone.
 
 ### 5. Confirm
@@ -254,18 +278,19 @@ recipient whose domain is new to the thread. That flag exists to be read aloud.
 | `This token cannot X` | Correct behaviour: the token lacks that capability |
 | `non-JSON (HTTP 302 ...)` or an HTML sign-in page | Egress to `script.googleusercontent.com` blocked, or the deployment is not set to "Anyone" |
 | TLS or self-signed certificate errors | Gateway inspection without the Cloudflare root in this host's trust store |
-| `must point at script.google.com` | The URL in `.env` is wrong; the client refuses to post the token elsewhere |
-| `GMAIL_SEND_APPS_SCRIPT_URL is required` | `.env` missing or unreadable by the user the agent runs as |
+| `must point at script.google.com` | The URL in `/srv/gmail-send/.env` is wrong; the client refuses to post the token elsewhere |
+| `GMAIL_SEND_APPS_SCRIPT_URL is required` | `/srv/gmail-send/.env` missing or unreadable by the user the agent runs as |
 | Wrong times in quoted replies | `GMAIL_SEND_TIMEZONE` was set; clear it |
-| Drafts do not sound like the owner | Style guide not loading; `npm run cli -- style` shows what was read |
+| Drafts do not sound like the owner | Style guide not loading; `cd /srv/gmail-send && npm run cli -- style` shows what was read |
 | `changed outside gmail-send` on an update | Correct behaviour: the draft no longer matches what was rendered here. Read it and draft afresh |
-| No tools in OpenClaw | Server failed to start. Run `npm run mcp` by hand in the install directory to see the real error |
+| No tools in OpenClaw | Server failed to start. Run `cd /srv/gmail-send && npm run mcp` by hand to see the real error |
 
 ## Report back
 
 State plainly:
 
-- the install path used
+- the install path used, in full
+- the absolute `node` path registered as the command
 - the `profile` output, with `capabilities`, `canSend`, `tokenLabel` and
   `timeZone` quoted, and the token redacted
 - the tool count from `mcp doctor`
