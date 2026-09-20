@@ -14,6 +14,7 @@ Gmail-identical drafting for AI agents. Renders new messages, replies and forwar
 - Architecture: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 - Setup, OAuth, MCP registration: [docs/SETUP.md](docs/SETUP.md)
 - Wiring it to OpenClaw, start to finish: [docs/OPENCLAW-SETUP.md](docs/OPENCLAW-SETUP.md)
+- Brief to hand the agent that administers the OpenClaw host: [docs/OPENCLAW-AGENT-BRIEF.md](docs/OPENCLAW-AGENT-BRIEF.md)
 - Running it on a remote host in general: [docs/REMOTE-DEPLOY.md](docs/REMOTE-DEPLOY.md)
 - Backlog mirrored to Jira: [docs/build-plan/BACKLOG.md](docs/build-plan/BACKLOG.md)
 - Agent instructions: [AGENTS.md](AGENTS.md), [CLAUDE.md](CLAUDE.md)
