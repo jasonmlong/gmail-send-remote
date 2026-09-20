@@ -240,10 +240,21 @@ function lastMessage_(threadId) {
 
 // ---- drafts ------------------------------------------------------------------
 
-function draftToWire_(gmailDraft) {
-  var msg = toCoreMessage_(gmailDraft.getMessage());
-  var meta = loadMeta_(gmailDraft.getId());
-  return { id: gmailDraft.getId(), threadId: msg.threadId || (meta && meta.threadId) || undefined, message: msg, updatedAt: msg.date, meta: meta || undefined };
+/**
+ * Drafts are read and written through the Advanced Gmail Service rather than
+ * GmailApp, so this project can declare gmail.compose instead of the broader
+ * gmail.modify: GmailApp's draft methods ask for wider access than anything
+ * here needs. The draft's message is then fetched by id through GmailApp,
+ * which gmail.readonly covers, so there is still only one message converter
+ * to keep faithful to Gmail's output.
+ */
+function draftToWire_(resource) {
+  var meta = loadMeta_(resource.id);
+  var messageId = resource.message && resource.message.id;
+  var m = messageId ? GmailApp.getMessageById(messageId) : null;
+  if (!m) throw new Error('Draft has no message yet: ' + resource.id);
+  var msg = toCoreMessage_(m);
+  return { id: resource.id, threadId: msg.threadId || (meta && meta.threadId) || undefined, message: msg, updatedAt: msg.date, meta: meta || undefined };
 }
 
 /**
@@ -253,23 +264,32 @@ function draftToWire_(gmailDraft) {
  */
 function listDrafts_(threadId) {
   var out = [];
-  GmailApp.getDrafts().forEach(function (d) {
+  var res = Gmail.Users.Drafts.list('me', { maxResults: 100 });
+  var drafts = (res && res.drafts) || [];
+  for (var i = 0; i < drafts.length; i++) {
+    if (!loadMeta_(drafts[i].id)) continue;
     try {
-      if (!loadMeta_(d.getId())) return;
-      var w = draftToWire_(d);
+      var w = draftToWire_(drafts[i]);
       if (!threadId || w.threadId === threadId) out.push(w);
     } catch (e) {
       /* a draft with no message yet */
     }
-  });
+  }
   return out;
 }
 
 function getDraft_(draftId) {
-  var d = GmailApp.getDraft(draftId);
-  if (!d) throw new Error('Draft not found: ' + draftId);
+  // Same message for an unknown id and for someone else's draft, so this is
+  // not an oracle for what exists in the mailbox.
   if (!loadMeta_(draftId)) throw new Error('Draft not found: ' + draftId);
-  return draftToWire_(d);
+  var resource;
+  try {
+    resource = Gmail.Users.Drafts.get('me', draftId);
+  } catch (e) {
+    throw new Error('Draft not found: ' + draftId);
+  }
+  if (!resource) throw new Error('Draft not found: ' + draftId);
+  return draftToWire_(resource);
 }
 
 function rawToWebSafe_(raw) {
@@ -355,20 +375,18 @@ function deleteOwnDraft_(draftId) {
   if (!loadMeta_(draftId)) {
     throw new Error('Refusing to delete draft ' + draftId + ': gmail-send did not create it. Delete it in Gmail if that is what you meant.');
   }
-  var d = GmailApp.getDraft(draftId);
-  if (!d) throw new Error('Draft not found: ' + draftId);
-  d.deleteDraft();
+  Gmail.Users.Drafts.remove('me', draftId);
   clearMeta_(draftId);
   return { deleted: draftId };
 }
 
 function sendDraft_(draftId) {
   if (!allowSend_()) throw new Error('Sending is disabled on this deployment. Run setAllowSend(true) in the editor to enable it.');
-  var d = GmailApp.getDraft(draftId);
-  if (!d) throw new Error('Draft not found: ' + draftId);
-  var sent = d.send();
+  var sent = Gmail.Users.Drafts.send({ id: draftId }, 'me');
   clearMeta_(draftId);
-  return toCoreMessage_(sent);
+  var m = sent && sent.id ? GmailApp.getMessageById(sent.id) : null;
+  if (!m) throw new Error('The draft was sent but could not be read back: ' + draftId);
+  return toCoreMessage_(m);
 }
 
 // ---- per-draft metadata so redraft() can re-render from the typed body ------

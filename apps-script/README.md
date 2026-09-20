@@ -46,6 +46,16 @@ Reviewed adversarially before first deployment; findings and fixes are in [../do
 - **Bcc is refused everywhere.** No action accepts it and the raw-message allowlist rejects the header. Gmail honours a Bcc present in a draft when a human later sends it and hides it from the visible copy, which is exactly how a staged draft becomes silent delivery to a third party.
 - **Drafts are only visible to the token that made them.** `listDrafts` and `getDraft` return drafts this API created, so a credential cannot enumerate half-written personal mail.
 - **Raw messages are filtered.** A submitted raw message may only carry the headers the renderer itself produces, so the token does not confer arbitrary header control over a staged draft.
-- **Scopes are the minimum for the job**: `gmail.modify` (read threads, write drafts), `gmail.settings.basic` (read the signature), `calendar.readonly` (timezone). Note that no Gmail scope allows drafting while forbidding sending, which is why the send switch is application-level. If the Calendar scope is unwanted, remove it from `appsscript.json` and the script falls back to the project timezone.
+- **Scopes are the minimum for the job**: `gmail.readonly` (read threads and messages), `gmail.compose` (create, update and delete drafts), `gmail.settings.basic` (read the signature), `calendar.readonly` (timezone), `userinfo.email` (identity).
+
+  Two things about that list are worth understanding, because the consent screen is alarming and the reasons are not obvious.
+
+  **No Gmail scope allows drafting while forbidding sending.** `gmail.compose` is the narrowest one that can write a draft at all, and Google describes it as "Manage drafts and send emails". That is why the send block is application-level instead: a token minted without the `send` capability cannot send, the global `setAllowSend` switch is off, and the MCP server does not register a send tool for such a token. Three independent gates, none of which is the OAuth scope.
+
+  **`gmail.compose` replaces the broader `gmail.modify`** this project used to request, which also permitted relabelling, trashing and marking mail read. Nothing here does any of that. The cost of the narrower scope is that drafts go through the Advanced Gmail Service rather than `GmailApp`, whose draft methods ask for wider access; `GmailApp` still reads threads and messages, which `gmail.readonly` covers.
+
+  `gmail.settings.basic` is what reads your real signature out of Gmail settings, which is the point of the project. There is no read-only variant, so the same scope that reads a signature could create filters. The script never does, and writing the signature needs both the `settings` capability and the `setAllowSettingsWrite` switch. If you would rather not grant it, capture the signature once into `config/signatures.json` and remove the scope from `appsscript.json`.
+
+  If the Calendar scope is unwanted, remove it and the script falls back to the project timezone, at the cost of wrong times in the attribution line of every reply.
 - **What this does not prevent.** An agent steered by a malicious email can still stage a convincing draft, including a forward of a sensitive thread, addressed to whoever the attacker wants. It cannot send it. Read the draft's recipients before you press Send; the drafting tools flag any recipient whose domain is new to the thread.
 - Publishing as a Marketplace add-on would let users install with one click but requires Google's OAuth verification for the sensitive Gmail scopes. The per-account copy avoids that entirely.

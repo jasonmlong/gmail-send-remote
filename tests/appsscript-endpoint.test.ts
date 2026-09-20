@@ -82,16 +82,13 @@ function makeContext(): Ctx {
     isUnread: () => false,
   };
 
-  const drafts: Record<string, { id: string; deleted?: boolean }> = { rOWNED: { id: 'rOWNED' }, rHUMAN: { id: 'rHUMAN' } };
-  const draftObj = (id: string) => ({
-    getId: () => id,
-    getMessage: () => message,
-    deleteDraft: () => {
-      drafts[id].deleted = true;
-      deleted.push(id);
-    },
-    send: () => message,
-  });
+  // Drafts are Advanced Gmail Service resources now, not GmailApp objects:
+  // the project declares gmail.compose rather than gmail.modify, and GmailApp's
+  // draft methods want wider access than that.
+  const drafts: Record<string, { id: string; message: { id: string; threadId: string }; deleted?: boolean }> = {
+    rOWNED: { id: 'rOWNED', message: { id: 'msg1', threadId: 'thr1' } },
+    rHUMAN: { id: 'rHUMAN', message: { id: 'msg1', threadId: 'thr1' } },
+  };
 
   const sandbox: Record<string, unknown> = {
     console,
@@ -123,8 +120,6 @@ function makeContext(): Ctx {
       },
       getThreadById: (id: string) => (id === 'thr1' ? thread : null),
       getMessageById: (id: string) => (id === 'msg1' ? message : null),
-      getDrafts: () => Object.keys(drafts).filter((k) => !drafts[k].deleted).map(draftObj),
-      getDraft: (id: string) => (drafts[id] && !drafts[id].deleted ? draftObj(id) : null),
     },
     Gmail: {
       Users: {
@@ -141,11 +136,27 @@ function makeContext(): Ctx {
         Drafts: {
           create: () => ({ id: 'rNEW' }),
           update: (_r: unknown, _u: string, id: string) => ({ id }),
+          list: () => ({ drafts: Object.keys(drafts).filter((k) => !drafts[k].deleted).map((k) => drafts[k]) }),
+          get: (_u: string, id: string) => {
+            if (!drafts[id] || drafts[id].deleted) throw new Error('Not Found');
+            return drafts[id];
+          },
+          remove: (_u: string, id: string) => {
+            if (!drafts[id] || drafts[id].deleted) throw new Error('Not Found');
+            drafts[id].deleted = true;
+            deleted.push(id);
+          },
+          send: (res: { id: string }) => {
+            const d = drafts[res.id];
+            if (!d || d.deleted) throw new Error('Not Found');
+            d.deleted = true;
+            return { id: d.message.id };
+          },
         },
       },
     },
   };
-  drafts.rNEW = { id: 'rNEW' };
+  drafts.rNEW = { id: 'rNEW', message: { id: 'msg1', threadId: 'thr1' } };
 
   const ctx = vm.createContext(sandbox);
   for (const f of FILES) vm.runInContext(fs.readFileSync(path.join(DIR, f), 'utf8'), ctx, { filename: f });

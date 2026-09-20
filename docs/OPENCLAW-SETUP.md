@@ -65,14 +65,38 @@ file per row and paste the contents of the local file into it:
 
 Delete the default `Code.gs`. Then open `appsscript.json` and replace its whole
 contents with `apps-script/appsscript.json`, which declares the Advanced Gmail
-Service, the four scopes and the web app settings.
+Service, the OAuth scopes and the web app settings.
 
 ### 4. Run setup()
 
-Select `setup` in the function dropdown and **Run**. Approve the consent screen
-(Gmail modify, Gmail settings basic, Calendar read-only). Google will warn that
-the app is unverified: **Advanced** > **Go to gmail-send (openclaw)**. That
-warning is expected for a script you own and are running as yourself.
+Select `setup` in the function dropdown and **Run**. Google will warn that the
+app is unverified: **Advanced** > **Go to gmail-send (openclaw)**. That warning
+is expected for a script you own and are running as yourself.
+
+The consent screen will say the script can **send** email and can **change your
+email settings and filters**. Both are worth understanding before you click
+through, because neither wording is a mistake.
+
+| What Google says | Scope | Why |
+|---|---|---|
+| View your email messages and settings | `gmail.readonly` | Reading the threads being replied to |
+| Manage drafts and send emails | `gmail.compose` | Writing drafts. **There is no Gmail scope that permits drafting without also permitting sending** |
+| See, edit, create or change your email settings and filters | `gmail.settings.basic` | Reading your real signature out of Gmail settings. No read-only variant of this scope exists |
+| See your calendars | `calendar.readonly` | Your timezone, for the "On \<date\> ... wrote:" line |
+| See your primary email address | `userinfo.email` | Identifies the account |
+
+The send wording describes what the *script* could do, not what the OpenClaw
+agent can. Sending is blocked three times over: the `openclaw` token is minted
+without the `send` capability and that is fixed in the credential, the
+`setAllowSend` switch is off, and the MCP server does not register a send tool
+for a token that cannot use it.
+
+The settings scope is the sharpest thing in the grant, since the same
+permission that reads a signature could create a filter. The script never
+writes one, and signature writes need both the `settings` capability and a
+switch that is off. If you would rather not grant it at all, capture your
+signature into `config/signatures.json` once and remove the scope from
+`appsscript.json`; drafts then use the local copy instead of what Gmail shows.
 
 The execution log prints the account email, the calendar timezone, the
 signatures it can see, and a primary token.
