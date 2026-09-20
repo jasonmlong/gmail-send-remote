@@ -1,0 +1,17 @@
+{
+  "$comment": "Copy to config/signatures.json and edit. That file is git-ignored because a real signature carries a name, direct phone numbers and often tracking ids. This library is only a FALLBACK: when a real account is connected, the signature Gmail holds in its own settings is used instead. These entries are used when the account has no signature of its own, or when one is selected explicitly by id.",
+  "signatures": [
+    {
+      "id": "you@example.com",
+      "name": "Your Name (Your Company)",
+      "sendAsEmail": "you@example.com",
+      "displayName": "Your Name",
+      "isDefault": true,
+      "source": "local",
+      "html": "<div dir=\"ltr\">Your Name<br>Title<br>Company<br>+1 (555) 123-4567</div>",
+      "$html_note": "Exactly the inner HTML Gmail stores for a signature, with no gmail_signature wrapper. The wrapper is added by the renderer.",
+      "text": "Your Name\nTitle\nCompany\n+1 (555) 123-4567",
+      "$text_note": "Optional. Without it the plain-text form is derived from the HTML using Gmail's own conversion rules."
+    }
+  ]
+}

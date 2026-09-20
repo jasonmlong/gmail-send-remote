@@ -1,0 +1,13 @@
+{
+  "$comment": "Hard style rules the linter enforces. The prose guide lives at the path in GMAIL_SEND_STYLE_GUIDE (.env).",
+  "preferredClosings": ["Thank you!", "Have a great day!", "Talk soon!", "Thank you very much!"],
+  "nextTouchpointClosingPattern": "^(See you|Talk to you|Speak) .+!$",
+  "avoidClosings": ["Catch you later"],
+  "bannedWords": ["honest", "genuine", "actually", "proper", "straight answer"],
+  "warnPhrases": ["every time"],
+  "signoffNames": ["Sam", "Sam Rivera", "- Sam", "-Sam", "Best, Sam", "Thanks, Sam"],
+  "greetingPrefix": "Hey ",
+  "maxWords": 250,
+  "noEmoji": true,
+  "noDashes": true
+}

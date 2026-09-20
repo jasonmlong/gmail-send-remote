@@ -1,0 +1,20 @@
+node_modules/
+dist/
+.tmp/
+*.log
+# OAuth secrets and tokens - never commit
+config/credentials.json
+config/token.json
+.env
+# Simulator state and preview output
+.gmail-sim/
+preview/
+
+# Local signature library: holds real names, phone numbers and signature
+# tracking ids. Ship config/signatures.example.json instead.
+config/signatures.json
+
+# Internal work tracking: Atlassian binding (cloud id, site) and the session
+# log. Useful locally, not for a public repo.
+.atlassian-sync.json
+.atlassian-sync/

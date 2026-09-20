@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "gmail-send": {
+      "command": "node",
+      "args": ["node_modules/tsx/dist/cli.mjs", "src/mcp/server.ts"],
+      "env": {
+        "GMAIL_SEND_PROVIDER": "sim"
+      }
+    }
+  }
+}
