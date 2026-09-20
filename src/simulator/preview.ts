@@ -5,6 +5,7 @@
  * lets a person eyeball exactly what the recipient and the sender will see
  * without opening Gmail.
  */
+import { randomUUID } from 'node:crypto';
 import { escapeHtml } from '../core/html.js';
 import type { Draft, EmailAddress, Message, Thread } from '../core/types.js';
 import { formatGmailDateTime } from '../core/attribution.js';
@@ -28,8 +29,36 @@ function list(l: EmailAddress[]): string {
   return l.map((a) => escapeHtml(a.name ?? a.email)).join(', ');
 }
 
+/**
+ * Message HTML comes from whoever sent the mail, and this page puts several
+ * messages plus the draft into one document. Unsanitised, opening a preview
+ * of a hostile message runs its markup in the context of everything else on
+ * the page, and a remote image URL is enough to carry the contents out
+ * without any mail being sent.
+ *
+ * Regexes cannot fully parse HTML, so this is not the only defence: the page
+ * also carries a Content-Security-Policy that blocks remote loads and any
+ * script without the page's own nonce. This pass removes the obvious active
+ * content so the CSP is a backstop rather than the sole guard.
+ *
+ * Remote images are neutralised rather than deleted, which is what Gmail
+ * itself does by default, and the placeholder keeps the layout honest.
+ */
+export function sanitizeEmailHtml(html: string): string {
+  return html
+    .replace(/<\s*(script|iframe|object|embed|applet|link|meta|base|form)\b[\s\S]*?<\s*\/\s*\1\s*>/gi, '')
+    .replace(/<\s*(script|iframe|object|embed|applet|link|meta|base|form)\b[^>]*\/?\s*>/gi, '')
+    .replace(/\s(on[a-z]+)\s*=\s*"[^"]*"/gi, '')
+    .replace(/\s(on[a-z]+)\s*=\s*'[^']*'/gi, '')
+    .replace(/\s(on[a-z]+)\s*=\s*[^\s>]+/gi, '')
+    .replace(/(href|src|action)\s*=\s*"\s*javascript:[^"]*"/gi, '$1="#blocked"')
+    .replace(/(href|src|action)\s*=\s*'\s*javascript:[^']*'/gi, "$1='#blocked'")
+    .replace(/\ssrc\s*=\s*"(?!data:|cid:)[^"]*"/gi, ' data-blocked-src="remote image blocked"')
+    .replace(/\ssrc\s*=\s*'(?!data:|cid:)[^']*'/gi, " data-blocked-src='remote image blocked'");
+}
+
 function bodyHtml(m: Message): string {
-  if (m.html) return m.html;
+  if (m.html) return sanitizeEmailHtml(m.html);
   return `<div dir="ltr">${escapeHtml(m.text ?? '').replace(/\n/g, '<br>')}</div>`;
 }
 
@@ -73,8 +102,20 @@ export function renderConversationPreview(thread: Thread | null, drafts: Draft[]
   const cards = (thread?.messages ?? []).map((m) => messageCard(m, opts)).join('\n');
   const draftCards = drafts.map((d) => messageCard(d.message, opts, true)).join('\n');
   const compose = drafts.map((d) => draftComposeBox(d, opts)).join('\n');
+  // One nonce per rendered page. Message HTML is sanitised on the way in, but
+  // this is what makes that a backstop rather than the only line: no remote
+  // fetch of any kind, and no script the page did not author itself.
+  const nonce = randomUUID().replace(/-/g, '');
+  const csp = [
+    "default-src 'none'",
+    `script-src 'nonce-${nonce}'`,
+    "style-src 'unsafe-inline'",
+    "img-src data: cid:",
+    "font-src data:",
+  ].join('; ');
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><title>${escapeHtml(opts.title ?? subject)}</title>
+<meta http-equiv="Content-Security-Policy" content="${csp}">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
   :root { --bg:#f6f8fc; --card:#fff; --ink:#1f1f1f; --muted:#5e5e5e; --line:#e0e3e7; --accent:#0b57d0; }
@@ -114,7 +155,7 @@ export function renderConversationPreview(thread: Thread | null, drafts: Draft[]
   ${compose}
   <footer>Preview rendered by gmail-send. Quoted text in received messages is collapsed like Gmail does; click the &#8230; button to expand.</footer>
 </div>
-<script>
+<script nonce="${nonce}">
   document.querySelectorAll('.msg').forEach(function(card){
     var q = card.querySelector('.gmail_quote_container');
     if(!q) return;

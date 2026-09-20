@@ -80,6 +80,10 @@ signatures it can see, and a primary token.
 **Leave the primary token where it is.** It carries `read, draft, send,
 settings`. It never goes near the host.
 
+That token is printed once, at creation, and only its hash is kept. Re-running
+`setup()` will not reprint it, and will not revive it if you ever revoke it;
+`rotateToken()` is how you replace it. You do not need it for anything below.
+
 ### 5. Deploy the web app
 
 **Deploy** > **New deployment** > gear icon > **Web app**.
@@ -112,7 +116,13 @@ applyRecommendedSearchScope()
 ```
 
 That sets `-in:spam -in:trash newer_than:180d`, enforced inside the script, so
-it binds any caller and not just the Node client. Adjust with
+it binds any caller and not just the Node client. It applies to reads by thread
+or message id as well as to searches, which is what makes it a boundary rather
+than a filter.
+
+Be precise about its reach: `-in:spam`, `-in:trash` and `newer_than:` are the
+operators enforced on a read by id. Anything else you put in the scope string
+narrows searching but will not stop a read of a known id. Adjust with
 `setSearchScope()` if OpenClaw needs to reach further back.
 
 ### 8. Confirm before you leave the editor
@@ -170,6 +180,16 @@ well written instead of sounding like the account owner.
 `config/signatures.json` is not needed here. When a real account is connected,
 the signature Gmail itself shows in Settings is always the default; the local
 library is only a fallback.
+
+Two working files hold mail in the clear on this host, and both are written
+owner-only by the code: `.gmail-sim/appsscript-draft-meta.json`, the render
+cache for every draft staged from here, and `preview/*.html` if you ever
+generate a preview. They survive both deleting the draft in Gmail and revoking
+the token, so treat the directory the way you treat `.env`:
+
+```bash
+chmod 700 .gmail-sim preview 2>/dev/null || true
+```
 
 ### Verify before wiring it up
 
@@ -300,6 +320,9 @@ Nothing in this path can send. A person presses Send.
 | Drafts do not sound like Jason | `config/style-guide.md` missing or the env var points elsewhere; `npm run cli -- style` shows what loaded |
 | No tools in OpenClaw | Server failed to start. Run `npm run mcp` by hand on the host to see the real error |
 | 18 tools including send | Wrong token. Revoke and mint a draft-only one |
+| `must point at script.google.com` | The URL in `.env` is wrong. The client refuses to post the token anywhere else |
+| `changed outside gmail-send` on an update | Correct behaviour: the draft no longer matches what was rendered here. Read it and draft afresh rather than re-rendering |
+| `Refusing to update draft ... did not create it` | Correct behaviour: that draft was written by hand |
 
 ## Revoking
 
@@ -311,8 +334,13 @@ working. Do this first if the host is ever lost, imaged or shared.
 
 Can: read the mailbox within the search scope, and stage drafts in it.
 
-Cannot: send anything, change the Gmail signature, delete drafts a person wrote
-by hand.
+Cannot: send anything, change the Gmail signature, set a Bcc, read or enumerate
+drafts a person wrote by hand, or update or delete them.
+
+Each of those is enforced in the script rather than in the Node client, which
+matters because anything with shell access on this host can read the token out
+of `.env` and call the endpoint directly. Treat the Node layer as convenience
+and the endpoint as the boundary.
 
 Worth being clear about the exposure that remains. A draft-only token still
 reads mail, and an agent steered by a malicious inbound message can stage a

@@ -5,6 +5,9 @@
 // { action: "draftReply", threadId, body } and get a native draft in Gmail.
 // ==========================================
 
+// Bcc is not accepted by any action here. See ALLOWED_RAW_HEADERS in
+// GmailAdapter.gs for why: a Bcc survives into the message a human later
+// sends, invisibly. Nothing this deployment does needs one.
 function addrs_(v) {
   if (v === undefined || v === null) return undefined;
   if (Array.isArray(v)) v = v.join(', ');
@@ -91,7 +94,7 @@ function draftReply_(r) {
   var original = r.messageId ? toCoreMessage_(GmailApp.getMessageById(r.messageId)) : lastMessage_(r.threadId);
   var rendered = GmailSendCore.composeReply(
     original,
-    { body: r.body, replyAll: !!r.replyAll, to: addrs_(r.to), cc: addrs_(r.cc), addCc: addrs_(r.addCc), bcc: addrs_(r.bcc), addBcc: addrs_(r.addBcc) },
+    { body: r.body, replyAll: !!r.replyAll, to: addrs_(r.to), cc: addrs_(r.cc), addCc: addrs_(r.addCc) },
     ctx.composeOptions
   );
   return store_(rendered, ctx, null, r);
@@ -101,7 +104,7 @@ function draftNew_(r) {
   if (!r.body) throw new Error('body is required');
   var ctx = context_(r.signatureId);
   var rendered = GmailSendCore.composeNew(
-    { to: addrs_(r.to) || [], cc: addrs_(r.cc), bcc: addrs_(r.bcc), subject: r.subject || '', body: r.body },
+    { to: addrs_(r.to) || [], cc: addrs_(r.cc), subject: r.subject || '', body: r.body },
     ctx.composeOptions
   );
   return store_(rendered, ctx, null, r);
@@ -113,7 +116,7 @@ function draftForward_(r) {
   var original = toCoreMessage_(GmailApp.getMessageById(r.messageId));
   var rendered = GmailSendCore.composeForward(
     original,
-    { to: addrs_(r.to) || [], cc: addrs_(r.cc), bcc: addrs_(r.bcc), body: r.body, includeAttachments: r.includeAttachments !== false },
+    { to: addrs_(r.to) || [], cc: addrs_(r.cc), body: r.body, includeAttachments: r.includeAttachments !== false },
     ctx.composeOptions
   );
   return store_(rendered, ctx, null, r);
@@ -129,16 +132,15 @@ function redraft_(r) {
   var body = r.body !== undefined ? r.body : meta.body;
   var to = r.to !== undefined ? addrs_(r.to) : meta.to;
   var cc = r.cc !== undefined ? addrs_(r.cc) : meta.cc;
-  var bcc = r.bcc !== undefined ? addrs_(r.bcc) : meta.bcc;
   var rendered;
   if (meta.mode === 'new') {
-    rendered = GmailSendCore.composeNew({ to: to || [], cc: cc, bcc: bcc, subject: r.subject !== undefined ? r.subject : meta.subject, body: body || '' }, ctx.composeOptions);
+    rendered = GmailSendCore.composeNew({ to: to || [], cc: cc, subject: r.subject !== undefined ? r.subject : meta.subject, body: body || '' }, ctx.composeOptions);
   } else if (meta.mode === 'reply') {
     var original = toCoreMessage_(GmailApp.getMessageById(meta.originalMessageId));
-    rendered = GmailSendCore.composeReply(original, { body: body || '', replyAll: r.replyAll !== undefined ? !!r.replyAll : meta.replyAll, to: to, cc: cc, bcc: bcc }, ctx.composeOptions);
+    rendered = GmailSendCore.composeReply(original, { body: body || '', replyAll: r.replyAll !== undefined ? !!r.replyAll : meta.replyAll, to: to, cc: cc }, ctx.composeOptions);
   } else {
     var orig = toCoreMessage_(GmailApp.getMessageById(meta.originalMessageId));
-    rendered = GmailSendCore.composeForward(orig, { to: to || [], cc: cc, bcc: bcc, body: body }, ctx.composeOptions);
+    rendered = GmailSendCore.composeForward(orig, { to: to || [], cc: cc, body: body }, ctx.composeOptions);
   }
   return store_(rendered, ctx, r.draftId, { body: body, replyAll: meta.replyAll, signatureId: signatureId });
 }

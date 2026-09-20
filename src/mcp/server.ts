@@ -14,6 +14,7 @@ import { z } from 'zod';
 import { parseAddressList } from '../core/address.js';
 import { htmlToText } from '../core/html.js';
 import type { Draft, EmailAddress, Message } from '../core/types.js';
+import { writePrivateFile } from '../private-file.js';
 import { createRuntime, type Runtime } from '../runtime.js';
 import { detectSignature } from '../signatures/detect.js';
 import { generateSignature } from '../signatures/template.js';
@@ -84,13 +85,28 @@ function draftSummary(d: Draft) {
  * it. Surfacing the odd one out gives a tripwire that does not depend on the
  * reader noticing a wrong address in a draft that otherwise looks like theirs.
  */
-async function unfamiliarRecipients(rt: Runtime, draft: Draft): Promise<string[] | undefined> {
-  const r = draft.rendered;
-  if (!r?.threadId) return undefined;
+export async function unfamiliarRecipients(rt: Runtime, draft: Draft): Promise<string[] | undefined> {
+  const r = draft.rendered ?? {
+    threadId: draft.threadId,
+    to: draft.message.to,
+    cc: draft.message.cc,
+    bcc: draft.message.bcc,
+  };
+  if (!r.threadId) return undefined;
   const domain = (a: EmailAddress) => a.email.toLowerCase().split('@')[1] ?? '';
   try {
     const thread = await rt.provider.getThread(r.threadId);
-    const known = new Set(thread.messages.flatMap((m) => [m.from, ...m.to, ...m.cc]).map(domain).filter(Boolean));
+    // Drafts are excluded from what counts as "known". This check runs after
+    // the draft has been filed into the thread, and a draft is a message in
+    // that thread, so without this the address being warned about appears in
+    // the evidence for its own familiarity and the warning disappears.
+    const known = new Set(
+      thread.messages
+        .filter((m) => m.id !== draft.id && !(m.labelIds ?? []).includes('DRAFT'))
+        .flatMap((m) => [m.from, ...m.to, ...m.cc])
+        .map(domain)
+        .filter(Boolean),
+    );
     const odd = [...r.to, ...r.cc, ...r.bcc].filter((a) => !known.has(domain(a)));
     return odd.length ? odd.map((a) => a.email) : undefined;
   } catch {
@@ -104,9 +120,9 @@ const fail = (e: unknown) => ({ isError: true, content: [{ type: 'text' as const
 async function writePreview(rt: Runtime, threadId: string | undefined, drafts: Draft[], name: string): Promise<string> {
   const thread = threadId ? await rt.provider.getThread(threadId) : null;
   const html = renderConversationPreview(thread, drafts, { timeZone: rt.cfg.timeZone, me: (await rt.provider.getProfile()).email });
-  fs.mkdirSync(rt.cfg.previewDir, { recursive: true });
+  fs.mkdirSync(rt.cfg.previewDir, { recursive: true, mode: 0o700 });
   const file = path.join(rt.cfg.previewDir, `${name.replace(/[^a-zA-Z0-9_-]+/g, '_')}.html`);
-  fs.writeFileSync(file, html, 'utf8');
+  writePrivateFile(file, html);
   return file;
 }
 

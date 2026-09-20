@@ -189,24 +189,50 @@ function listThreads_(query, max) {
   return threads.map(summarizeThread_);
 }
 
+/**
+ * The search scope has to bind reads by id as well as searches, or it is not
+ * an access boundary at all: knowing a thread id was enough to read anything
+ * the scope was meant to exclude.
+ *
+ * Gmail search syntax is too large to reimplement, so the operators this
+ * understands are the ones the scope is documented to use. Anything else in
+ * the scope string still narrows searching but is not enforced here, and
+ * that limit is stated in the docs rather than glossed over.
+ */
+function assertThreadInScope_(t) {
+  var scope = searchScope_();
+  if (!scope) return;
+  if (/-in:spam/.test(scope) && t.isInSpam && t.isInSpam()) throw new Error('Thread is outside this deployment\'s search scope');
+  if (/-in:trash/.test(scope) && t.isInTrash && t.isInTrash()) throw new Error('Thread is outside this deployment\'s search scope');
+  var m = /newer_than:(\d+)([dmy])/.exec(scope);
+  if (m) {
+    var days = Number(m[1]) * (m[2] === 'y' ? 365 : m[2] === 'm' ? 30 : 1);
+    var cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+    if (t.getLastMessageDate() < cutoff) throw new Error('Thread is outside this deployment\'s search scope');
+  }
+}
+
 function getMessage_(messageId) {
   // getMessageById returns null for an unknown or foreign id, and reaching
   // into null further down produced a confusing internal error that also
   // worked as an existence oracle.
   var m = GmailApp.getMessageById(messageId);
   if (!m) throw new Error('Message not found: ' + messageId);
+  assertThreadInScope_(m.getThread());
   return toCoreMessage_(m);
 }
 
 function getThread_(threadId) {
   var t = GmailApp.getThreadById(threadId);
   if (!t) throw new Error('Thread not found: ' + threadId);
+  assertThreadInScope_(t);
   return { id: t.getId(), messages: t.getMessages().map(toCoreMessage_) };
 }
 
 function lastMessage_(threadId) {
   var t = GmailApp.getThreadById(threadId);
   if (!t) throw new Error('Thread not found: ' + threadId);
+  assertThreadInScope_(t);
   var msgs = t.getMessages();
   if (!msgs.length) throw new Error('Thread has no messages: ' + threadId);
   return toCoreMessage_(msgs[msgs.length - 1]);
@@ -220,10 +246,16 @@ function draftToWire_(gmailDraft) {
   return { id: gmailDraft.getId(), threadId: msg.threadId || (meta && meta.threadId) || undefined, message: msg, updatedAt: msg.date, meta: meta || undefined };
 }
 
+/**
+ * Only drafts this API created. A half-written personal draft is often more
+ * sensitive than sent mail, and the search scope never applied to drafts at
+ * all, so enumeration here was a way around it.
+ */
 function listDrafts_(threadId) {
   var out = [];
   GmailApp.getDrafts().forEach(function (d) {
     try {
+      if (!loadMeta_(d.getId())) return;
       var w = draftToWire_(d);
       if (!threadId || w.threadId === threadId) out.push(w);
     } catch (e) {
@@ -236,6 +268,7 @@ function listDrafts_(threadId) {
 function getDraft_(draftId) {
   var d = GmailApp.getDraft(draftId);
   if (!d) throw new Error('Draft not found: ' + draftId);
+  if (!loadMeta_(draftId)) throw new Error('Draft not found: ' + draftId);
   return draftToWire_(d);
 }
 
@@ -253,7 +286,10 @@ var ALLOWED_RAW_HEADERS = {
   from: true,
   to: true,
   cc: true,
-  bcc: true,
+  // Bcc is deliberately absent. Gmail honours a Bcc present in a raw draft
+  // when a human later sends it, and hides it from the visible copy, which
+  // makes it the one header that turns "stage a draft for review" into silent
+  // delivery to a third party. This deployment has no legitimate use for it.
   'reply-to': true,
   'in-reply-to': true,
   references: true,
@@ -287,12 +323,26 @@ function createDraftFromRaw_(raw, threadId) {
   return getDraft_(created.id);
 }
 
+/**
+ * Updates a draft, but only one this API created.
+ *
+ * An update replaces the draft's entire message, so without this check an
+ * agent could overwrite a draft the owner typed by hand. Worse, the metadata
+ * that used to be written here afterwards was exactly what deleteOwnDraft_
+ * accepts as proof of ownership, so updating laundered the draft into
+ * something the same token could then permanently delete.
+ */
 function updateDraftFromRaw_(draftId, raw, threadId) {
+  if (!loadMeta_(draftId)) {
+    throw new Error('Refusing to update draft ' + draftId + ': gmail-send did not create it. Edit it in Gmail if that is what you meant.');
+  }
   var resource = { message: { raw: rawToWebSafe_(assertSafeRaw_(raw)) } };
   if (threadId) resource.message.threadId = threadId;
   var updated = Gmail.Users.Drafts.update(resource, 'me', draftId);
   var id = updated.id || draftId;
-  if (!loadMeta_(id)) saveMeta_(id, { mode: 'raw', threadId: threadId });
+  // Gmail can hand back a new id for the same draft; carry the ownership
+  // record across rather than minting one for an id we have never seen.
+  if (id !== draftId && !loadMeta_(id)) saveMeta_(id, loadMeta_(draftId));
   return getDraft_(id);
 }
 

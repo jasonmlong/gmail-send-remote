@@ -7,7 +7,7 @@
  * Protocol: POST JSON {token, action, ...params} -> {ok, result | error}.
  * See docs/APPS-SCRIPT-API.md.
  */
-import type { Draft, Message, Signature, Thread, ThreadSummary } from '../core/types.js';
+import type { Draft, Message, RenderedMessage, Signature, Thread, ThreadSummary } from '../core/types.js';
 import { DraftMetaCache } from '../draft-meta.js';
 import type { DraftInput, ListThreadsQuery, MailProvider, Profile } from '../provider.js';
 
@@ -30,6 +30,34 @@ interface WireDraft {
   updatedAt: string;
 }
 
+const addressKey = (list: readonly { email: string }[] | undefined): string =>
+  (list ?? [])
+    .map((a) => a.email.trim().toLowerCase())
+    .sort()
+    .join(',');
+
+/**
+ * Does the cached render still describe this draft? Compares the fields a
+ * reviewer decides on - who it goes to and what it is about - rather than the
+ * body, whose whitespace Gmail is entitled to normalise.
+ *
+ * A backend that does not echo parsed headers back (the wire-protocol test
+ * double stores the raw message without parsing it) gives nothing to compare,
+ * and is treated as "no information" rather than as a mismatch. Gmail always
+ * returns them, so the check is live exactly where the attack is.
+ */
+function renderMatchesMessage(rendered: RenderedMessage, message: Message): boolean {
+  const messageCarriesHeaders =
+    message.to.length > 0 || message.cc.length > 0 || message.bcc.length > 0 || (message.subject ?? '') !== '';
+  if (!messageCarriesHeaders) return true;
+  return (
+    addressKey(rendered.to) === addressKey(message.to) &&
+    addressKey(rendered.cc) === addressKey(message.cc) &&
+    addressKey(rendered.bcc) === addressKey(message.bcc) &&
+    (rendered.subject ?? '') === (message.subject ?? '')
+  );
+}
+
 export class AppsScriptProvider implements MailProvider {
   readonly kind = 'appsscript' as const;
   private readonly meta: DraftMetaCache;
@@ -38,6 +66,23 @@ export class AppsScriptProvider implements MailProvider {
   constructor(private readonly opts: AppsScriptProviderOptions) {
     if (!opts.url) throw new Error('GMAIL_SEND_APPS_SCRIPT_URL is required for the appsscript provider');
     if (!opts.token) throw new Error('GMAIL_SEND_APPS_SCRIPT_TOKEN is required for the appsscript provider');
+    // The token is a bearer credential for the mailbox, so where it is sent
+    // matters as much as what it permits. Without this, a typo or an edited
+    // .env could post it in cleartext, or to someone else's host, and the
+    // first sign of trouble would be mail appearing somewhere unexpected.
+    // A caller supplying its own fetch is a test double and reaches no network.
+    if (!opts.fetchImpl) {
+      let parsed: URL;
+      try {
+        parsed = new URL(opts.url);
+      } catch {
+        throw new Error(`GMAIL_SEND_APPS_SCRIPT_URL is not a valid URL: ${opts.url}`);
+      }
+      if (parsed.protocol !== 'https:') throw new Error('GMAIL_SEND_APPS_SCRIPT_URL must be https, so the token is never sent in cleartext');
+      if (parsed.hostname !== 'script.google.com') {
+        throw new Error(`GMAIL_SEND_APPS_SCRIPT_URL must point at script.google.com, not ${parsed.hostname}`);
+      }
+    }
     this.meta = new DraftMetaCache(opts.metaPath);
     this.fetchImpl = opts.fetchImpl ?? ((url, init) => globalThis.fetch(url, init));
   }
@@ -55,7 +100,13 @@ export class AppsScriptProvider implements MailProvider {
     try {
       data = JSON.parse(text);
     } catch {
-      throw new Error(`Apps Script returned non-JSON (HTTP ${res.status}). Is the web app deployed with access "Anyone"? First 200 chars: ${text.slice(0, 200)}`);
+      // The response body is deliberately not quoted here. An endpoint that
+      // echoes the request would put the token into this message, and from
+      // there into logs and agent transcripts.
+      const looksLikeHtml = /^\s*<(?:!doctype|html)/i.test(text);
+      throw new Error(
+        `Apps Script returned non-JSON (HTTP ${res.status}, ${text.length} bytes${looksLikeHtml ? ', looks like an HTML sign-in page' : ''}). Is the web app deployed with access "Anyone", and is egress to script.googleusercontent.com allowed?`,
+      );
     }
     if (!data.ok) throw new Error(data.error ?? `Apps Script error on ${action}`);
     return data.result as T;
@@ -65,9 +116,27 @@ export class AppsScriptProvider implements MailProvider {
     return { ...m, date: new Date(m.date) };
   }
 
+  /**
+   * The local render cache is only trustworthy while it still describes the
+   * draft Gmail actually holds. A draft can change underneath it: the owner
+   * corrects a recipient in Gmail, or something calls the endpoint directly.
+   * Reporting the cached recipients then hides that change from the person
+   * reviewing the draft, and re-rendering from the cache silently reinstates
+   * it. So when the two disagree, the cache is dropped and the live message
+   * is the answer; update_draft fails closed rather than reverting anything.
+   */
   private reviveDraft(d: WireDraft): Draft {
     const meta = this.meta.get(d.id);
-    return { id: d.id, threadId: d.threadId ?? meta?.rendered.threadId, message: this.reviveMessage(d.message), rendered: meta?.rendered, raw: meta?.raw, updatedAt: new Date(d.updatedAt) };
+    const message = this.reviveMessage(d.message);
+    const fresh = meta ? renderMatchesMessage(meta.rendered, message) : false;
+    return {
+      id: d.id,
+      threadId: d.threadId ?? meta?.rendered.threadId,
+      message,
+      rendered: fresh ? meta?.rendered : undefined,
+      raw: fresh ? meta?.raw : undefined,
+      updatedAt: new Date(d.updatedAt),
+    };
   }
 
   async getProfile(): Promise<Profile> {

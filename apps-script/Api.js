@@ -41,10 +41,17 @@ function doGet(e) {
   return json_({ ok: true, result: { name: 'gmail-send' } });
 }
 
+// A draft with attachments is the largest legitimate body. Anything beyond
+// this is someone making the script do parsing work for free.
+var MAX_REQUEST_BYTES = 12 * 1024 * 1024;
+
 function doPost(e) {
+  var body = (e && e.postData && e.postData.contents) || '{}';
+  if (body.length > MAX_REQUEST_BYTES) return json_({ ok: false, error: 'Bad request' });
+
   var req;
   try {
-    req = JSON.parse((e && e.postData && e.postData.contents) || '{}');
+    req = JSON.parse(body);
   } catch (parseError) {
     return json_({ ok: false, error: 'Bad request' });
   }
@@ -64,11 +71,10 @@ function doPost(e) {
   var entry = ACTIONS[req.action];
   if (!entry || typeof entry.fn !== 'function') return json_({ ok: false, error: 'Unknown action' });
 
+  // Says what the action needs, not what this token holds: a stolen credential
+  // should not be able to enumerate its own reach from an error message.
   if (auth.caps.indexOf(entry.cap) === -1) {
-    return json_({
-      ok: false,
-      error: 'This token cannot ' + req.action + '. It holds [' + auth.caps.join(', ') + '] and that action needs "' + entry.cap + '".',
-    });
+    return json_({ ok: false, error: 'This token cannot ' + req.action + '. That action needs the "' + entry.cap + '" capability.' });
   }
 
   try {
@@ -139,9 +145,19 @@ function saveTokens_(map) {
   PropertiesService.getScriptProperties().setProperty('GMAIL_SEND_TOKENS', JSON.stringify(map));
 }
 
-/** Returns the token's record, or null. Never reveals which part failed. */
+/** Every token this script mints is 64 hex characters. */
+var TOKEN_SHAPE = /^[0-9a-f]{64}$/;
+
+/**
+ * Returns the token's record, or null. Never reveals which part failed.
+ *
+ * The shape check comes first and costs nothing: an anonymous flood of junk
+ * tokens is refused without a Script Properties read, a registry parse or a
+ * SHA-256, which is the difference between a cheap rejection and one that
+ * spends the owner's daily quota.
+ */
 function authenticate_(token) {
-  if (typeof token !== 'string' || !token) return null;
+  if (typeof token !== 'string' || !TOKEN_SHAPE.test(token)) return null;
   var rec = loadTokens_()[hashToken_(token)];
   if (!rec || rec.revoked) return null;
   if (!rec.caps || !rec.caps.length) return null;

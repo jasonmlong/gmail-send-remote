@@ -15,16 +15,31 @@
  */
 function setup() {
   var props = PropertiesService.getScriptProperties();
-
-  var token = props.getProperty('GMAIL_SEND_TOKEN');
-  if (!token) {
-    token = newSecret_();
-    props.setProperty('GMAIL_SEND_TOKEN', token);
-  }
-  // The primary token is kept in plaintext so this function can reprint it.
-  // Every other token is stored as a hash and shown only once, at mint time.
   var tokens = loadTokens_();
-  tokens[hashToken_(token)] = { label: 'primary', caps: ['read', 'draft', 'send', 'settings'], created: new Date().toISOString(), primary: true };
+
+  // Earlier versions kept the primary token in plaintext so setup() could
+  // reprint it on demand. That made a properties dump enough to authenticate
+  // with the one credential holding all four capabilities, so it is migrated
+  // to a hash here and never written in the clear again.
+  var legacy = props.getProperty('GMAIL_SEND_TOKEN');
+  if (legacy) {
+    props.deleteProperty('GMAIL_SEND_TOKEN');
+    if (!tokens[hashToken_(legacy)]) {
+      tokens[hashToken_(legacy)] = { label: 'primary', caps: CAPABILITIES.slice(), created: new Date().toISOString(), primary: true };
+    }
+  }
+
+  var primaryHash = null;
+  for (var h in tokens) if (tokens[h].primary) primaryHash = h;
+
+  // Re-running setup() must never resurrect a revoked credential. It used to
+  // overwrite the primary's record wholesale, which silently cleared the
+  // revoked flag and handed a stolen token its access back.
+  var minted = null;
+  if (!primaryHash) {
+    minted = newSecret_();
+    tokens[hashToken_(minted)] = { label: 'primary', caps: CAPABILITIES.slice(), created: new Date().toISOString(), primary: true };
+  }
   saveTokens_(tokens);
 
   if (!props.getProperty('GMAIL_SEND_ALLOW_SEND')) props.setProperty('GMAIL_SEND_ALLOW_SEND', '0');
@@ -41,7 +56,22 @@ function setup() {
   Logger.log('Then in gmail-send/.env:');
   Logger.log('  GMAIL_SEND_PROVIDER=appsscript');
   Logger.log('  GMAIL_SEND_APPS_SCRIPT_URL=<the /exec URL>');
-  Logger.log('  GMAIL_SEND_APPS_SCRIPT_TOKEN=' + token);
+
+  if (minted) {
+    Logger.log('  GMAIL_SEND_APPS_SCRIPT_TOKEN=' + minted);
+    Logger.log('');
+    Logger.log('That primary token holds every capability and is shown here once only.');
+    Logger.log('For an unattended or remote agent, run mintDraftOnlyToken() instead and use that.');
+  } else if (tokens[primaryHash].revoked) {
+    Logger.log('  GMAIL_SEND_APPS_SCRIPT_TOKEN=<the primary token was REVOKED and stays revoked>');
+    Logger.log('');
+    Logger.log('Run rotateToken() to mint a replacement. Re-running setup() will not bring a revoked token back.');
+  } else {
+    Logger.log('  GMAIL_SEND_APPS_SCRIPT_TOKEN=<unchanged; only its hash is stored, so it cannot be reprinted>');
+    Logger.log('');
+    Logger.log('Lost it? Run rotateToken(). Other tokens are unaffected.');
+  }
+  return minted;
 }
 
 function newSecret_() {
@@ -144,18 +174,20 @@ function purgeRevokedTokens() {
   Logger.log('Purged ' + dropped + ' revoked token(s).');
 }
 
-/** Rotate the primary token. Update .env and the Claude Desktop config afterwards. */
+/**
+ * Rotate the primary token. The old one stops working immediately and the new
+ * one is printed once; only its hash is kept, so copy it now.
+ */
 function rotateToken() {
-  var props = PropertiesService.getScriptProperties();
-  var old = props.getProperty('GMAIL_SEND_TOKEN');
+  PropertiesService.getScriptProperties().deleteProperty('GMAIL_SEND_TOKEN');
   var tokens = loadTokens_();
-  if (old) delete tokens[hashToken_(old)];
+  for (var h in tokens) if (tokens[h].primary) delete tokens[h];
   var secret = newSecret_();
-  props.setProperty('GMAIL_SEND_TOKEN', secret);
-  tokens[hashToken_(secret)] = { label: 'primary', caps: ['read', 'draft', 'send', 'settings'], created: new Date().toISOString(), primary: true };
+  tokens[hashToken_(secret)] = { label: 'primary', caps: CAPABILITIES.slice(), created: new Date().toISOString(), primary: true };
   saveTokens_(tokens);
   Logger.log('New primary token: ' + secret);
-  Logger.log('Other tokens are unaffected. Update GMAIL_SEND_APPS_SCRIPT_TOKEN in .env.');
+  Logger.log('Shown once. Other tokens are unaffected. Update GMAIL_SEND_APPS_SCRIPT_TOKEN in .env.');
+  return secret;
 }
 
 // ---- switches ----------------------------------------------------------------

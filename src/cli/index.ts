@@ -18,6 +18,7 @@ import { seedDemoMailbox } from '../simulator/seed.js';
 import { SimulatedGmail } from '../simulator/simulator.js';
 import { loadStyleGuide } from '../style/guide.js';
 import { lintDraft, loadRules } from '../style/lint.js';
+import { writePrivateFile } from '../private-file.js';
 
 interface Args {
   cmd: string[];
@@ -82,8 +83,8 @@ async function writePreview(rt: Runtime, threadId: string | undefined, drafts: D
   const me = (await rt.provider.getProfile()).email;
   const html = renderConversationPreview(thread, drafts, { timeZone: rt.cfg.timeZone, me });
   const file = out ?? path.join(rt.cfg.previewDir, `${name}.html`);
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, html, 'utf8');
+  fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+  writePrivateFile(file, html);
   return file;
 }
 

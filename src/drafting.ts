@@ -164,7 +164,15 @@ export class DraftingService {
   async updateDraft(draftId: string, patch: DraftUpdateRequest): Promise<Draft> {
     const existing = await this.provider.getDraft(draftId);
     const prev = existing.rendered;
-    if (!prev) throw new Error(`Draft ${draftId} has no render metadata; delete it and create a new draft instead.`);
+    if (!prev) {
+      // Either this draft was never rendered here, or it has since changed in
+      // Gmail and the cached render no longer describes it. Re-rendering from
+      // that cache would quietly undo the change, including a recipient the
+      // owner had corrected, so this fails closed instead.
+      throw new Error(
+        `Draft ${draftId} cannot be updated from here: there is no current render for it, or it has been changed outside gmail-send. Read it with preview_draft and create a new draft instead of re-rendering this one.`,
+      );
+    }
     const opts = await this.composeOptions(patch.signatureId);
     const bodyOf = (r: RenderedMessage) => r.text.split(/\n\n(?:--\n|On .+? wrote:|---------- Forwarded message)/s)[0];
     const body = patch.body ?? bodyOf(prev);

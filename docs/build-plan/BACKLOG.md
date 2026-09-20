@@ -145,3 +145,22 @@ This repository copy serves the OpenClaw instance rather than Claude Desktop, th
 - [ ] T11.8 Clone on the host, verify `profile` shows `["read","draft"]` and `canSend: false`, register with `openclaw mcp add`, confirm 17 tools
 - [ ] T11.9 Confirm outbound HTTPS to `script.google.com` and `script.googleusercontent.com` survives the Gateway egress policy, and that TLS inspection (if on) trusts cleanly
 - [ ] T11.10 First real draft from OpenClaw compared against a hand-typed Gmail reply
+
+## E12 Adversarial review before the OpenClaw deployment (2026-09-20)
+
+Two passes (Codex, local). Findings and reasoning in `docs/SECURITY-REVIEW.md`; regressions in `tests/appsscript-endpoint.test.ts` (R1-R8) and `tests/review-2026-09-20.test.ts`.
+
+- [x] T12.1 updateDraft requires existing ownership metadata, closing the update-then-delete chain that let a draft-only token destroy hand-written drafts (`apps-script/GmailAdapter.js`)
+- [x] T12.2 Bcc removed from every high-level action and from the raw-header allowlist (`apps-script/Drafting.js`, `apps-script/GmailAdapter.js`)
+- [x] T12.3 setup() no longer resurrects a revoked primary token, and no longer stores it in plaintext; shown once, rotateToken() replaces it (`apps-script/Setup.js`)
+- [x] T12.4 Search scope enforced on reads by thread and message id, not only searches, with its real reach documented (`apps-script/GmailAdapter.js`)
+- [x] T12.5 listDrafts and getDraft restricted to drafts this API created (`apps-script/GmailAdapter.js`)
+- [x] T12.6 Render cache compared against the live message; stale cache dropped so summaries cannot report approved recipients for a changed draft, and update_draft fails closed instead of reinstating them (`src/appsscript/client.ts`, `src/drafting.ts`)
+- [x] T12.7 Unfamiliar-recipient warning excludes draft messages, so a staged recipient cannot make its own domain familiar (`src/mcp/server.ts`)
+- [x] T12.8 Endpoint URL pinned to https on script.google.com; response bodies no longer echoed into errors (`src/appsscript/client.ts`)
+- [x] T12.9 Preview HTML sanitised and served under a CSP with a per-page nonce (`src/simulator/preview.ts`)
+- [x] T12.10 Token shape checked before any properties read; request body capped; capability errors no longer enumerate the token's reach (`apps-script/Api.js`)
+- [x] T12.11 Draft cache and previews written 0600 into 0700 directories (`src/draft-meta.ts`, `src/private-file.ts`)
+- [x] T12.12 Docs corrected where they overstated a guarantee (`apps-script/README.md`, `docs/APPS-SCRIPT-API.md`, `docs/SETUP.md`, `docs/OPENCLAW-SETUP.md`)
+- [ ] T12.13 Confirm on the live deployment that Gmail's compose view shows a Bcc set on an API-created draft (the assumption behind S20.2's severity)
+- [ ] T12.14 Re-run the z.ai pass once that account has balance (same blocker as T10.22)

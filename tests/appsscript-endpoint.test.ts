@@ -19,7 +19,7 @@ const FILES = ['GmailSendCore.js', 'Api.js', 'GmailAdapter.js', 'Drafting.js', '
 interface Ctx {
   doGet: (e?: unknown) => { getContent(): string };
   doPost: (e: unknown) => { getContent(): string };
-  setup: () => void;
+  setup: () => string;
   setAllowSend: (f: boolean) => void;
   setAllowSettingsWrite: (f: boolean) => void;
   setSearchScope: (q: string) => void;
@@ -165,8 +165,9 @@ describe('Apps Script endpoint', () => {
 
   beforeEach(() => {
     ctx = makeContext();
-    ctx.setup();
-    token = ctx.__props.GMAIL_SEND_TOKEN;
+    // setup() hands back the primary token once, at creation. It is no longer
+    // stored in the clear, so this is the only way to get hold of it.
+    token = ctx.setup();
   });
 
   it('S3: the unauthenticated probe says nothing beyond the product name', () => {
@@ -276,7 +277,7 @@ describe('Apps Script endpoint', () => {
       const res = post(ctx, { token: t, action: 'sendDraft', draftId: 'rOWNED' });
       expect(res.ok).toBe(false);
       expect(res.error).toMatch(/cannot sendDraft/);
-      expect(res.error).toMatch(/needs "send"/);
+      expect(res.error).toMatch(/needs the "send" capability/);
       // and the primary token, which does hold "send", now can
       expect(post(ctx, { token, action: 'sendDraft', draftId: 'rOWNED' }).ok).toBe(true);
     });
@@ -286,16 +287,16 @@ describe('Apps Script endpoint', () => {
       ctx.setAllowSettingsWrite(true);
       const res = post(ctx, { token: t, action: 'saveSignature', html: '<div>x</div>' });
       expect(res.ok).toBe(false);
-      expect(res.error).toMatch(/needs "settings"/);
+      expect(res.error).toMatch(/needs the "settings" capability/);
       expect(ctx.__patched).toHaveLength(0);
     });
 
     it('a read-only token cannot create or delete drafts', () => {
       const t = ctx.mintToken_('viewer', ['read']);
       expect(post(ctx, { token: t, action: 'getThread', threadId: 'thr1' }).ok).toBe(true);
-      expect(post(ctx, { token: t, action: 'draftNew', to: 'a@b.com', subject: 's', body: 'Hey,\n\nx\n\nThank you!' }).error).toMatch(/needs "draft"/);
-      expect(post(ctx, { token: t, action: 'createDraft', raw: 'Subject: x\r\n\r\nbody' }).error).toMatch(/needs "draft"/);
-      expect(post(ctx, { token: t, action: 'deleteDraft', draftId: 'rOWNED' }).error).toMatch(/needs "draft"/);
+      expect(post(ctx, { token: t, action: 'draftNew', to: 'a@b.com', subject: 's', body: 'Hey,\n\nx\n\nThank you!' }).error).toMatch(/needs the "draft" capability/);
+      expect(post(ctx, { token: t, action: 'createDraft', raw: 'Subject: x\r\n\r\nbody' }).error).toMatch(/needs the "draft" capability/);
+      expect(post(ctx, { token: t, action: 'deleteDraft', draftId: 'rOWNED' }).error).toMatch(/needs the "draft" capability/);
     });
 
     it('profile reports what the calling token may do', () => {
@@ -359,4 +360,82 @@ describe('Apps Script endpoint', () => {
     expect(res.result.text).toContain('On Fri, Sep 18, 2026 at 7:00 AM Dana <dana@partner.example> wrote:');
     expect(res.result.text).toContain('> Totals attached.');
   });
+  // Findings from the 2026-09-20 adversarial review (a Codex pass plus a local
+  // pass), each reproduced before the fix and pinned here afterwards.
+  describe('2026-09-20 review regressions', () => {
+    it('R1: updateDraft refuses a draft this API did not create, so deletion cannot be laundered', () => {
+      const t = ctx.mintToken_('remote', ['read', 'draft']);
+      const over = post(ctx, { token: t, action: 'updateDraft', draftId: 'rHUMAN', raw: 'Subject: replaced\r\nTo: a@b.com\r\n\r\ngone' });
+      expect(over.ok).toBe(false);
+      expect(over.error).toMatch(/did not create it/);
+
+      // The chain that made this critical: update used to mint the ownership
+      // record that delete accepts as proof.
+      const del = post(ctx, { token: t, action: 'deleteDraft', draftId: 'rHUMAN' });
+      expect(del.ok).toBe(false);
+      expect(del.error).toMatch(/did not create it/);
+      expect(ctx.__deleted).not.toContain('rHUMAN');
+    });
+
+    it('R2: a raw draft may not carry Bcc', () => {
+      const res = post(ctx, { token, action: 'createDraft', raw: 'Subject: x\r\nTo: a@b.com\r\nBcc: exfil@attacker.example\r\n\r\nbody' });
+      expect(res.ok).toBe(false);
+      expect(res.error).toBe('Header not permitted in a raw draft: bcc');
+    });
+
+    it('R3: the high-level actions ignore a bcc parameter entirely', () => {
+      const res = post(ctx, { token, action: 'draftReply', threadId: 'thr1', body: 'Hey,\n\nOk.\n\nThank you!', bcc: 'exfil@attacker.example', addBcc: 'exfil2@attacker.example' });
+      expect(res.ok).toBe(true);
+      expect(res.result.bcc).toEqual([]);
+      expect(JSON.stringify(res.result)).not.toContain('attacker.example');
+    });
+
+    it('R4: re-running setup() does not resurrect a revoked primary token', () => {
+      expect(post(ctx, { token, action: 'profile' }).ok).toBe(true);
+
+      const tokens = JSON.parse(ctx.__props.GMAIL_SEND_TOKENS);
+      for (const h of Object.keys(tokens)) if (tokens[h].primary) tokens[h].revoked = true;
+      ctx.__props.GMAIL_SEND_TOKENS = JSON.stringify(tokens);
+      expect(post(ctx, { token, action: 'profile' }).error).toBe('Unauthorized');
+
+      ctx.setup();
+      expect(post(ctx, { token, action: 'profile' }).error).toBe('Unauthorized');
+    });
+
+    it('R5: the search scope binds reads by id, not only searches', () => {
+      // The stubbed thread's last message is older than one day.
+      ctx.setSearchScope('newer_than:1d');
+      expect(post(ctx, { token, action: 'getThread', threadId: 'thr1' }).error).toMatch(/outside this deployment/);
+      expect(post(ctx, { token, action: 'getMessage', messageId: 'msg1' }).error).toMatch(/outside this deployment/);
+      expect(post(ctx, { token, action: 'draftReply', threadId: 'thr1', body: 'Hey,\n\nx\n\nThank you!' }).error).toMatch(/outside this deployment/);
+
+      ctx.setSearchScope('');
+      expect(post(ctx, { token, action: 'getThread', threadId: 'thr1' }).ok).toBe(true);
+    });
+
+    it('R6: listDrafts and getDraft expose only drafts this API created', () => {
+      const before = post(ctx, { token, action: 'listDrafts' });
+      expect(before.ok).toBe(true);
+      expect(before.result.map((d: { id: string }) => d.id)).not.toContain('rHUMAN');
+      expect(post(ctx, { token, action: 'getDraft', draftId: 'rHUMAN' }).error).toBe('Draft not found: rHUMAN');
+
+      const created = post(ctx, { token, action: 'createDraft', raw: 'Subject: hi\r\nTo: a@b.com\r\n\r\nbody' });
+      expect(created.ok).toBe(true);
+      expect(post(ctx, { token, action: 'listDrafts' }).result.map((d: { id: string }) => d.id)).toContain(created.result.id);
+    });
+
+    it('R7: a token of the wrong shape is refused before any properties read', () => {
+      expect(post(ctx, { token: 'a'.repeat(63), action: 'profile' }).error).toBe('Unauthorized');
+      expect(post(ctx, { token: 'z'.repeat(64), action: 'profile' }).error).toBe('Unauthorized');
+      expect(post(ctx, { token: token.toUpperCase(), action: 'profile' }).error).toBe('Unauthorized');
+    });
+
+    it('R8: a capability error does not enumerate what the token holds', () => {
+      const t = ctx.mintToken_('reader', ['read']);
+      const res = post(ctx, { token: t, action: 'draftNew', to: 'a@b.com', subject: 's', body: 'Hey,\n\nx\n\nThank you!' });
+      expect(res.error).toMatch(/needs the "draft" capability/);
+      expect(res.error).not.toContain('read');
+    });
+  });
+
 });

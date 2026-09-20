@@ -65,9 +65,9 @@ Open Gmail: the draft sits inside the conversation with the real signature. Or r
 setSearchScope('-in:spam -in:trash newer_than:180d')
 ```
 
-The scope is combined into every search inside the script, so it binds anyone calling the endpoint, not just this client.
+The scope is combined into every search inside the script, and is also checked when a thread or message is read by id, so it binds anyone calling the endpoint rather than just this client. The operators enforced on an id read are `-in:spam`, `-in:trash` and `newer_than:`.
 
-Three capabilities are off by default and can only be armed from the editor: sending (`setAllowSend`), writing the Gmail signature (`setAllowSettingsWrite`), and deleting drafts the tool did not create, which is always refused. Leave sending off unless you have a specific reason. If `signatures push` fails saying settings writes are disabled, that is why.
+Three capabilities are off by default and can only be armed from the editor: sending (`setAllowSend`), writing the Gmail signature (`setAllowSettingsWrite`), and updating or deleting drafts the tool did not create, which is always refused. Leave sending off unless you have a specific reason. If `signatures push` fails saying settings writes are disabled, that is why.
 
 Full deployment notes and security caveats: [../apps-script/README.md](../apps-script/README.md). Wire protocol: [APPS-SCRIPT-API.md](APPS-SCRIPT-API.md). Review findings: [SECURITY-REVIEW.md](SECURITY-REVIEW.md).
 

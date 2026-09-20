@@ -136,3 +136,153 @@ These are properties of the design rather than defects. Know them, do not build 
 - **The design prevents autonomous delivery, not autonomous staging.** The worst realistic outcome of prompt injection is a draft in your Drafts folder containing a sensitive thread addressed to an attacker, written in your voice and indistinguishable from your own work, waiting for you to press Send. The fidelity goal and the review step are in tension, and no single fix resolves it.
 - **Mailbox content reaches the model transcript.** Inherent to the product.
 - **Anonymous access plus one shared secret is a coarse shape** for a credential that can read a mailbox. Restricting the deployment to signed-in Google accounts would remove the anonymous threat model entirely, at the cost of the Node client needing a Google identity.
+
+---
+
+# Security review, 2026-09-20 (before the OpenClaw deployment)
+
+Run before pointing a remote, always-on agent at a live mailbox. Two
+independent adversarial passes: a Codex pass and a local pass. A z.ai pass was
+requested again and again refused on account balance, so this is two passes,
+not three (T10.22 still open).
+
+Threat model added since the first review: the Node side now runs on a VPS the
+owner does not sit at, the agent reads untrusted inbound mail, and it has shell
+access on that host. That last point reframed everything. The token lives in
+`.env` on the same machine, so **every control implemented in the Node client
+is advisory**: an injected agent reads the token and calls the endpoint
+directly. Only what the Apps Script enforces is a boundary. Most of the fixes
+below move a control from one side to the other.
+
+## Fixed
+
+### S20.1 A draft-only token could overwrite and permanently delete hand-written drafts. HIGH
+
+`updateDraftFromRaw_` performed no ownership check and then wrote the very
+metadata `deleteOwnDraft_` accepts as proof of ownership. Updating therefore
+laundered any draft into a deletable one. Reproduced end to end against the
+real script files with a `[read, draft]` token: refused, update, delete, gone.
+Gmail's draft delete bypasses Trash. Combined with unrestricted `listDrafts`,
+the agent could enumerate personal drafts and pick one.
+
+Fixed by requiring existing metadata before an update, and by carrying the
+ownership record across rather than minting one for an unknown id.
+
+### S20.2 Bcc reached the stored draft. HIGH
+
+`draftReply`, `draftNew`, `draftForward` and `redraft` all passed `bcc` and
+`addBcc` to the renderer, and `bcc` was in the raw-header allowlist. Confirmed
+by rendering: a single parameter produced `Bcc: exfil@attacker.example` in the
+draft's MIME. The MCP schemas had dropped Bcc, which protected nothing against
+a direct call. Gmail honours a Bcc in a draft when a human later sends it.
+
+Fixed by removing Bcc from every action and from the allowlist. The Node client
+never sent it, so nothing legitimate is lost.
+
+### S20.3 setup() resurrected a revoked primary token. HIGH
+
+It rewrote the primary's registry record with no `revoked` field, from a
+plaintext property that revocation never cleared. Revoke, re-run `setup()`, and
+a stolen credential worked again. Fixed: `setup()` never clears the flag, and
+the primary is no longer stored in plaintext. It is shown once at creation;
+`rotateToken()` replaces it.
+
+### S20.4 The search scope was not a read boundary. HIGH
+
+Only `listThreads` consulted it. `getThread`, `getMessage`, `lastMessage`,
+`getDraft` and `listDrafts` did not, so a known id read anything the scope was
+meant to exclude, and `draftReply` returned the quoted original as a bonus.
+
+Fixed with `assertThreadInScope_` on every id read. The limit is stated rather
+than papered over: the operators enforced on an id read are `-in:spam`,
+`-in:trash` and `newer_than:`. Gmail search syntax is too large to reimplement,
+and anything else in the scope string narrows searching only.
+
+### S20.5 Drafts were enumerable. MEDIUM
+
+`listDrafts` returned every draft in the mailbox with full content, and the
+scope never applied to drafts. Now restricted to drafts this API created, as is
+`getDraft`.
+
+### S20.6 A stale render cache concealed and reinstated recipients. HIGH
+
+`reviveDraft` attached cached metadata without comparing it to the fetched
+message, and `draftSummary` preferred the cache. Codex reproduced a draft
+reporting `intended@example.com` while actually addressed to
+`exfil@attacker.invalid`, with the real Bcc reported as empty. Worse, a
+body-only `update_draft` rebuilt recipients from that cache, silently undoing a
+correction the owner had made in Gmail.
+
+Fixed by comparing the cache against the live message on every read and
+dropping it when they disagree; `update_draft` then fails closed and says why.
+A backend that does not echo parsed headers is treated as "nothing to compare"
+rather than as a mismatch.
+
+### S20.7 The unfamiliar-recipient warning could vouch for itself. MEDIUM
+
+It ran after the draft was filed into the thread, and counted every thread
+message's To and Cc as known. A draft is a message in its thread, so the
+attacker address made its own domain familiar and the warning vanished. Fixed
+by excluding draft messages. The remaining limit is inherent and documented:
+the check is by domain, so another address at a domain already in the thread
+does not trigger it.
+
+### S20.8 Transport accepted any URL and echoed responses into errors. MEDIUM
+
+The client accepted `http://` and any host, so a typo or an edited `.env` could
+post the token in cleartext or to someone else's server, and the non-JSON error
+path quoted the response body, which an echoing endpoint turns into token
+disclosure in logs and agent transcripts. Now pinned to https on
+`script.google.com`, and the error reports status, size and whether it looked
+like HTML, without the body.
+
+### S20.9 Previews executed hostile email HTML. MEDIUM
+
+Message HTML went into the preview document unsanitised, with no CSP and no
+isolation, alongside every other message and the draft. A remote image URL is
+enough to carry data out with no mail sent. Now sanitised (scripts, handlers,
+`javascript:` URLs, remote image sources) and served under a CSP that blocks
+remote loads and any script without the page's own nonce. Regexes cannot parse
+HTML, so the CSP is the backstop, not the guard.
+
+### S20.10 Anonymous callers could burn the owner's quota. MEDIUM
+
+Every request parsed JSON, read Script Properties, parsed the registry and
+hashed the input before rejecting it. A token shape check now rejects junk
+before any of that, and the request body is capped.
+
+### S20.11 Working files held mail in the clear at default permissions. MEDIUM
+
+`.gmail-sim/appsscript-draft-meta.json` stores the full rendered text and raw
+MIME of every staged draft, and previews store whole conversations. Both
+outlive deleting the draft in Gmail and revoking the token. Both are now
+written 0600 into 0700 directories.
+
+### S20.12 A capability error enumerated the token's reach. LOW
+
+Now names the capability the action needs, not the ones the token holds.
+
+## Not changed, and why
+
+- **The Node layer stays advisory.** It is not a boundary and is no longer
+  described as one. The endpoint is where controls live.
+- **Domain-level recipient warnings stay.** Comparing full addresses would flag
+  every new person at a known company and train the reader to ignore it.
+- **Anonymous access stays**, for the same reason as the first review: the
+  client authenticates with a token, not a Google identity.
+- **Scope enforcement on id reads is partial** and says so, rather than
+  implying that an arbitrary Gmail query is enforced.
+
+## Verified sound
+
+Auth runs before any work; the action allowlist resists inherited property
+names; the capability gate precedes every handler; tokens are hashed and shown
+once; lookup is by hash key, so there is no comparison timing leak; revocation
+is checked per request; the raw-header allowlist holds; sending needs both the
+capability and the switch; the token travels in the POST body and appears in no
+log line. Codex independently confirmed that all 16 actions reject missing,
+invalid and revoked credentials, and that a read-only token fails all nine
+write actions.
+
+Regressions for every finding above: `tests/appsscript-endpoint.test.ts`
+(R1-R8) and `tests/review-2026-09-20.test.ts`.
