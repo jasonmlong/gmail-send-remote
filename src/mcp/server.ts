@@ -156,15 +156,26 @@ export async function buildServer(rt: Runtime): Promise<McpServer> {
   // should not be shown a send tool at all: a capability the model cannot use
   // is one it will waste a turn discovering. Both gates must agree, so a token
   // without "send" stays unable to send even if sending is enabled globally.
+  //
+  // Only worth asking when sending is enabled locally. canSend is the AND of
+  // both gates, so with allowSend off the answer is false whatever the backend
+  // replies, and the round trip cannot change which tools get registered.
+  //
+  // It is not a free question. Against the Apps Script endpoint it costs ~1.7s
+  // (measured on an idle host: 199ms to list tools without it, 1868ms with).
+  // An MCP host that allows 1500ms to list tools kills the server before it
+  // advertises anything, so a draft-only deployment that gains nothing from the
+  // probe was paying for it with every tool it has. Skipping it takes start-up
+  // from ~1900ms to ~200ms.
   let canSend = cfg.allowSend;
-  let capabilities: string[] | undefined;
-  try {
-    const probe = await provider.getProfile();
-    capabilities = probe.capabilities;
-    if (probe.canSend !== undefined) canSend = cfg.allowSend && probe.canSend;
-  } catch {
-    // Backend unreachable at start-up. Fall back to local config rather than
-    // refusing to start; individual calls will surface the real error.
+  if (cfg.allowSend) {
+    try {
+      const probe = await provider.getProfile();
+      if (probe.canSend !== undefined) canSend = probe.canSend;
+    } catch {
+      // Backend unreachable at start-up. Fall back to local config rather than
+      // refusing to start; individual calls will surface the real error.
+    }
   }
 
   server.registerTool(
