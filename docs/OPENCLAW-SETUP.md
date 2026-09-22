@@ -173,6 +173,8 @@ After pulling a release that changes `src/core/` or `apps-script/`:
 5. Keep the existing URL and token. A normal code update does not require `setup()` or a new token.
 6. Run `showSettings()`, then run `npm run cli -- profile` on the configured host to verify the live `/exec` endpoint and its draft-only capabilities. Confirm `deploymentVersion` matches `GMAIL_SEND_VERSION` in `apps-script/Api.js`. This identifies the `Api` revision and the successful call exercises `GmailAdapter`; it does not replace copying all five files together.
 
+If `profile` returns `Unauthorized`, the request reached `doPost` but the configured token did not match a live record in this project's token registry. Run `listTokens()` in this exact Apps Script project. If the expected OpenClaw label is absent or revoked, mint a fresh draft-only token under a new label and replace only `GMAIL_SEND_APPS_SCRIPT_TOKEN` on the host. A token change takes effect immediately and does not require a deployment. A project upgraded directly from version 0.3.x can instead run `setup()` once to register its existing primary token without rotating it.
+
 Always update this project from `gmail-send-remote`, not from the laptop's `gmail-send` checkout.
 
 If an Apps Script action reports that a name `is not defined`, such as `CAPABILITIES is not defined`, copy all five code files again and deploy a **New version**. That error usually identifies a mixed or stale Apps Script deployment. Restarting OpenClaw cannot change the code behind the `/exec` URL.

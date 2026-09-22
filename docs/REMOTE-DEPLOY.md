@@ -108,7 +108,7 @@ Worth being clear-eyed about the remaining exposure. A draft-only token still re
 
 | Symptom | Cause |
 |---|---|
-| `Unauthorized` | Token wrong, revoked, or not minted yet |
+| `Unauthorized` JSON response | The request reached `doPost`, but the token is wrong, revoked, or absent from this Apps Script project's registry. Run `listTokens()` in the project that owns the configured `/exec` URL, mint a fresh consumer-specific draft-only token, update `.env`, and retry. No deployment is needed for a token change. |
 | `This token cannot X` | Correct behaviour: the token lacks that capability |
 | `non-JSON (HTTP 302 ...)` or an HTML sign-in page | Egress blocked, or the deployment is not set to "Anyone" access |
 | `GMAIL_SEND_APPS_SCRIPT_URL is required` | `.env` missing or not being found |

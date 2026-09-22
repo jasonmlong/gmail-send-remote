@@ -61,6 +61,19 @@ npm run cli -- draft reply --thread <id> --body-file reply.txt
 
 Open Gmail: the draft sits inside the conversation with the real signature. Or run `testDraftLatestInbox()` in the editor for the same check without Node.
 
+### If `profile` returns `Unauthorized`
+
+An `Unauthorized` JSON response comes from `doPost` after the request reaches the Apps Script code. It means the submitted token is missing, revoked, or absent from that project's token registry. An HTML sign-in page or HTTP access error points to the web app boundary.
+
+1. Open the Apps Script project that owns the exact `/exec` URL in this checkout's `.env`.
+2. Run `listTokens()` and inspect only the labels, capabilities, and state. Do not paste a token into chat or source control.
+3. For OpenClaw, set `LABEL` in `mintDraftOnlyToken()` to a fresh label such as `openclaw-2`, run it, and immediately copy the one-time token into `GMAIL_SEND_APPS_SCRIPT_TOKEN` in this checkout's `.env`.
+4. Run `npm run cli -- profile`, then restart the MCP process after the CLI succeeds.
+
+If this project was upgraded directly from version 0.3.x and you intentionally want to keep its old primary token, run `setup()` once. It preserves and registers an existing `GMAIL_SEND_TOKEN`; it does not rotate it. A newly minted draft-only token is safer for an agent because it cannot send or change Gmail settings.
+
+Token registration and revocation use Script Properties and take effect immediately. They do not require another Apps Script deployment.
+
 7. Recommended once it works: narrow what the deployment can read, by running this in the editor.
 
 ```

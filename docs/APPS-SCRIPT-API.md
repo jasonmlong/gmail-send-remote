@@ -90,7 +90,7 @@ No action accepts `bcc` or `addBcc`, and `Bcc` is refused in a raw message. See 
 
 ## Errors
 
-- `Unauthorized`: token missing, wrong, or not a string.
+- `Unauthorized`: `doPost` received the request, but the token is missing, wrong, revoked, not a string, or absent from this Apps Script project's registry. The JSON response confirms application-level authentication ran. Token registration and revocation take effect through Script Properties without a deployment.
 - `Unknown action`: the name is not one of the actions above. Inherited property names such as `constructor` land here too.
 - `Bad request`: the body was not a JSON object.
 - `Sending is disabled on this deployment...`: run `setAllowSend(true)` in the editor.
