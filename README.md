@@ -93,14 +93,16 @@ Use this after pulling a new release or changing `src/core/` or `apps-script/`.
    ```
 
 2. Open the existing OpenClaw Apps Script project.
-3. Replace `Api`, `GmailAdapter`, `Drafting`, `Setup`, and `GmailSendCore` with the matching files from this repository. Update `appsscript.json` if its repository version changed.
+3. Replace `Api`, `GmailAdapter`, `Drafting`, `Setup`, and `GmailSendCore` with the matching files from this repository. Copy all five together, even when only one appears to have changed, so the deployment cannot combine incompatible revisions. Update `appsscript.json` if its repository version changed.
 4. Save the project. If `appsscript.json` changed, run `selfTest()` in the editor and approve any new scopes before deploying. The self-test reads and renders but does not save or send mail.
 5. Choose **Deploy > Manage deployments**, edit the existing web app, select **New version**, and deploy it.
 6. Keep the existing URL and token. Do not rerun `setup()` or mint a new token for an ordinary code update. `setup()` manages initial credentials and switches; deploying a code version does not require it.
 7. Run `showSettings()` and confirm the send and settings switches remain disabled.
-8. From the configured OpenClaw host, run `npm run cli -- profile`. This confirms the existing `/exec` URL serves the new working deployment and still reports the expected account and draft-only capabilities.
+8. From the configured OpenClaw host, run `npm run cli -- profile`. This confirms the existing `/exec` URL serves the expected `Api` revision and a working `GmailAdapter`, and still reports the expected account and draft-only capabilities. Its `deploymentVersion` must match `GMAIL_SEND_VERSION` near the top of `apps-script/Api.js`. This value identifies the `Api` revision, so copying all five files in step 3 remains required.
 
 Never update the OpenClaw Apps Script from the sibling `gmail-send` checkout. This repository contains additional endpoint restrictions for the remote host.
+
+If an Apps Script action reports that a name `is not defined`, such as `CAPABILITIES is not defined`, the project probably contains files from different revisions or the `/exec` URL still serves an older version. Copy all five code files again, save them, deploy a **New version**, and check `deploymentVersion` through `npm run cli -- profile`. Restarting OpenClaw alone does not update Apps Script.
 
 ## Install on the OpenClaw host
 

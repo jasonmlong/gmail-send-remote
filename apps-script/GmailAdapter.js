@@ -5,6 +5,24 @@
 // Advanced Gmail Service so To/Cc/Bcc and threading headers are exact).
 // ==========================================
 
+function allowSend_() {
+  return PropertiesService.getScriptProperties().getProperty('GMAIL_SEND_ALLOW_SEND') === '1';
+}
+
+/** Writing the Gmail signature changes every message the owner types by hand, so it is gated too. */
+function allowSettingsWrite_() {
+  return PropertiesService.getScriptProperties().getProperty('GMAIL_SEND_ALLOW_SETTINGS_WRITE') === '1';
+}
+
+function signaturePlacement_() {
+  return PropertiesService.getScriptProperties().getProperty('GMAIL_SEND_SIGNATURE_PLACEMENT') === 'before-quote' ? 'before-quote' : 'after-quote';
+}
+
+/** Optional Gmail search terms ANDed into every search, e.g. "-in:spam -in:trash newer_than:180d". */
+function searchScope_() {
+  return PropertiesService.getScriptProperties().getProperty('GMAIL_SEND_QUERY_SCOPE') || '';
+}
+
 /**
  * @param {{label: string, caps: string[]}} [auth] the calling token's record,
  *   when there is one. Reporting its capabilities back lets a client hide
@@ -24,7 +42,9 @@ function getProfile_(auth) {
   var def = null;
   for (var i = 0; i < sendAs.length; i++) if (sendAs[i].isDefault) def = sendAs[i];
 
-  var caps = auth ? auth.caps : CAPABILITIES;
+  // Drafting calls getProfile_ without a token record. Keep that fallback
+  // local so a mixed deployment cannot fail on a shared capabilities global.
+  var caps = auth ? (Array.isArray(auth.caps) ? auth.caps.slice() : []) : ['read', 'draft', 'send', 'settings'];
   return {
     email: email,
     name: def ? def.name : undefined,

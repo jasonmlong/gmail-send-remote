@@ -169,5 +169,6 @@ Two passes (Codex, local). Findings and reasoning in `docs/SECURITY-REVIEW.md`; 
 - [x] T12.11 Draft cache and previews written 0600 into 0700 directories (`src/draft-meta.ts`, `src/private-file.ts`)
 - [x] T12.12 Docs corrected where they overstated a guarantee (`apps-script/README.md`, `docs/APPS-SCRIPT-API.md`, `docs/SETUP.md`, `docs/OPENCLAW-SETUP.md`)
 - [x] T12.15 Narrowed OAuth grant (gmail.readonly + gmail.compose, replacing gmail.modify) verified on the live deployment: selfTest() and testDraftLatestInbox() both pass, covering search, signature read, Drafts.create and the Drafts.get plus getMessageById readback
+- [x] T12.16 Remove the cross-file capabilities global, report the deployed Apps Script version through `profile`, and regress the editor-call fallback (`apps-script/Api.js`, `apps-script/GmailAdapter.js`, `apps-script/Setup.js`, `tests/appsscript-endpoint.test.ts`)
 - [ ] T12.13 Confirm on the live deployment that Gmail's compose view shows a Bcc set on an API-created draft (the assumption behind S20.2's severity)
 - [ ] T12.14 Re-run the z.ai pass once that account has balance (same blocker as T10.22)

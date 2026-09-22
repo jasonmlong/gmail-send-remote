@@ -31,6 +31,8 @@ export interface Profile {
   tokenLabel?: string;
   /** What this credential is permitted to do. Absent means the backend does not scope capabilities. */
   capabilities?: Capability[];
+  /** Apps Script code version serving the configured /exec URL. */
+  deploymentVersion?: string;
   /**
    * Whether sending is actually possible for this caller right now, after both
    * the credential's own capabilities and the deployment's switches are applied.

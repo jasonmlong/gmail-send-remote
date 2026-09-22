@@ -36,13 +36,13 @@ Mint and revoke from the Apps Script editor; there is no action that changes the
 
 Tokens are stored as SHA-256 hashes, so the script properties contain nothing usable. Every token is shown once, at mint time, and that includes the primary one: `setup()` prints it when it creates it and never again. Use `rotateToken()` if it is lost, and note that re-running `setup()` will not resurrect a revoked token.
 
-A refused capability returns a specific error, since the caller already authenticated and hiding the reason would only waste its time:
+A refused capability names the capability required for the action without listing the token's other capabilities:
 
 ```
-This token cannot sendDraft. It holds [read, draft] and that action needs "send".
+This token cannot sendDraft. That action needs the "send" capability.
 ```
 
-`profile` reports the calling token's own view: `tokenLabel`, `capabilities`, `canSend` and `canWriteSettings`, the last two already combining the capability with the global switch. The MCP server uses `canSend` to decide whether to advertise a send tool at all.
+`profile` reports the calling token's own view: `tokenLabel`, `capabilities`, `canSend` and `canWriteSettings`, the last two already combining the capability with the global switch. It also returns `deploymentVersion`, which identifies the `Api` revision serving the configured `/exec` URL. The MCP server uses `canSend` to decide whether to advertise a send tool at all.
 
 ## Capability switches
 
@@ -75,7 +75,7 @@ No action accepts `bcc` or `addBcc`, and `Bcc` is refused in a raw message. See 
 
 | action | params | result |
 |---|---|---|
-| `profile` | | `{email, name?, sendAs:[{email,name?,isDefault,replyTo?}], timeZone}` |
+| `profile` | | `{email, name?, sendAs:[{email,name?,isDefault,replyTo?}], timeZone, tokenLabel, capabilities, canSend, canWriteSettings, deploymentVersion}` |
 | `listThreads` | `query?` (Gmail search), `max?` | `[{id, subject, snippet, lastDate, messageCount, participants[], labelIds}]` |
 | `getThread` | `threadId` | `{id, messages: Message[]}` |
 | `getMessage` | `messageId` | `Message` |
@@ -97,4 +97,5 @@ No action accepts `bcc` or `addBcc`, and `Bcc` is refused in a raw message. See 
 - `Writing Gmail settings is disabled on this deployment...`: run `setAllowSettingsWrite(true)` in the editor.
 - `Refusing to delete draft X: gmail-send did not create it...`
 - `Header not permitted in a raw draft: x-whatever`
+- `<name> is not defined`, including `CAPABILITIES is not defined`: the Apps Script project probably contains files from different revisions, or the `/exec` deployment still serves an older revision. Replace all five code files from one checkout and deploy a new version.
 - Any Gmail error text from Apps Script is passed through in `error` and also written to the script's logs.

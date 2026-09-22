@@ -8,6 +8,12 @@
 // carry an editable constant on the first line. Edit it, then Run.
 // ==========================================
 
+function setupCapabilities_() {
+  // Keep this aligned with ACTIONS in Api.gs and the no-auth fallback in
+  // GmailAdapter.gs. Endpoint tests compare all three vocabularies.
+  return ['read', 'draft', 'send', 'settings'];
+}
+
 /**
  * Run once after pasting the project in. Normal code updates use a new web app
  * deployment version and do not need setup() again.
@@ -26,7 +32,7 @@ function setup() {
   if (legacy) {
     props.deleteProperty('GMAIL_SEND_TOKEN');
     if (!tokens[hashToken_(legacy)]) {
-      tokens[hashToken_(legacy)] = { label: 'primary', caps: CAPABILITIES.slice(), created: new Date().toISOString(), primary: true };
+      tokens[hashToken_(legacy)] = { label: 'primary', caps: setupCapabilities_(), created: new Date().toISOString(), primary: true };
     }
   }
 
@@ -39,7 +45,7 @@ function setup() {
   var minted = null;
   if (!primaryHash) {
     minted = newSecret_();
-    tokens[hashToken_(minted)] = { label: 'primary', caps: CAPABILITIES.slice(), created: new Date().toISOString(), primary: true };
+    tokens[hashToken_(minted)] = { label: 'primary', caps: setupCapabilities_(), created: new Date().toISOString(), primary: true };
   }
   saveTokens_(tokens);
 
@@ -83,8 +89,9 @@ function newSecret_() {
 
 function mintToken_(label, caps) {
   if (!label) throw new Error('A label is required, so you can tell tokens apart later.');
+  var allowed = setupCapabilities_();
   for (var i = 0; i < caps.length; i++) {
-    if (CAPABILITIES.indexOf(caps[i]) === -1) throw new Error('Unknown capability: ' + caps[i] + '. Valid: ' + CAPABILITIES.join(', '));
+    if (allowed.indexOf(caps[i]) === -1) throw new Error('Unknown capability: ' + caps[i] + '. Valid: ' + allowed.join(', '));
   }
   var tokens = loadTokens_();
   for (var h in tokens) {
@@ -184,7 +191,7 @@ function rotateToken() {
   var tokens = loadTokens_();
   for (var h in tokens) if (tokens[h].primary) delete tokens[h];
   var secret = newSecret_();
-  tokens[hashToken_(secret)] = { label: 'primary', caps: CAPABILITIES.slice(), created: new Date().toISOString(), primary: true };
+  tokens[hashToken_(secret)] = { label: 'primary', caps: setupCapabilities_(), created: new Date().toISOString(), primary: true };
   saveTokens_(tokens);
   Logger.log('New primary token: ' + secret);
   Logger.log('Shown once. Other tokens are unaffected. Update GMAIL_SEND_APPS_SCRIPT_TOKEN in .env.');

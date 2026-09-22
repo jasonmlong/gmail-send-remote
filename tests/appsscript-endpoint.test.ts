@@ -17,8 +17,13 @@ const DIR = path.resolve(__dirname, '..', 'apps-script');
 const FILES = ['GmailSendCore.js', 'Api.js', 'GmailAdapter.js', 'Drafting.js', 'Setup.js'];
 
 interface Ctx {
+  GMAIL_SEND_VERSION: string | undefined;
+  ACTIONS: Record<string, { cap: string }>;
   doGet: (e?: unknown) => { getContent(): string };
   doPost: (e: unknown) => { getContent(): string };
+  context_: (signatureId?: string) => { profile: { capabilities: string[] }; composeOptions: { signaturePlacement: string } };
+  getProfile_: (auth?: { label: string; caps: string[] }) => { capabilities: string[] };
+  setupCapabilities_: () => string[];
   setup: () => string;
   setAllowSend: (f: boolean) => void;
   setAllowSettingsWrite: (f: boolean) => void;
@@ -36,7 +41,7 @@ interface Ctx {
 const ME = 'owner@example.com';
 let uuidCounter = 1;
 
-function makeContext(): Ctx {
+function makeContext(files: string[] = FILES): Ctx {
   const props: Record<string, string> = {};
   const userProps: Record<string, string> = {};
   const searches: string[] = [];
@@ -159,7 +164,7 @@ function makeContext(): Ctx {
   drafts.rNEW = { id: 'rNEW', message: { id: 'msg1', threadId: 'thr1' } };
 
   const ctx = vm.createContext(sandbox);
-  for (const f of FILES) vm.runInContext(fs.readFileSync(path.join(DIR, f), 'utf8'), ctx, { filename: f });
+  for (const f of files) vm.runInContext(fs.readFileSync(path.join(DIR, f), 'utf8'), ctx, { filename: f });
   sandbox.__props = props;
   sandbox.__userProps = userProps;
   sandbox.__searches = searches;
@@ -209,6 +214,39 @@ describe('Apps Script endpoint', () => {
     expect(res.ok).toBe(true);
     expect(res.result.email).toBe(ME);
     expect(res.result.timeZone).toBe('America/Cancun');
+    expect(res.result.deploymentVersion).toBe(ctx.GMAIL_SEND_VERSION);
+  });
+
+  it('loads the drafting context without Api.js globals', () => {
+    const drafting = makeContext(['GmailSendCore.js', 'GmailAdapter.js', 'Drafting.js']);
+    expect(drafting.CAPABILITIES).toBeUndefined();
+    const result = drafting.context_();
+    expect(result.profile.capabilities).toEqual(['read', 'draft', 'send', 'settings']);
+    expect(result.composeOptions.signaturePlacement).toBe('after-quote');
+  });
+
+  it('keeps the capability vocabulary aligned across actions, setup, and profile', () => {
+    const actionCaps = [...new Set(Object.values(ctx.ACTIONS).map((entry) => entry.cap))].sort();
+    expect(actionCaps).toEqual(ctx.setupCapabilities_().slice().sort());
+    expect(ctx.getProfile_().capabilities.slice().sort()).toEqual(actionCaps);
+  });
+
+  it('keeps the package, MCP, and Apps Script versions aligned', () => {
+    const apiSource = fs.readFileSync(path.join(DIR, 'Api.js'), 'utf8');
+    const serverSource = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'mcp', 'server.ts'), 'utf8');
+    const packageJson = JSON.parse(fs.readFileSync(path.resolve(__dirname, '..', 'package.json'), 'utf8'));
+    const apiVersion = apiSource.match(/var GMAIL_SEND_VERSION = '([^']+)'/)?.[1];
+    const mcpVersion = serverSource.match(/new McpServer\(\{ name: 'gmail-send', version: '([^']+)'/)?.[1];
+    expect(apiVersion).toBeDefined();
+    expect(mcpVersion).toBe(apiVersion);
+    expect(packageJson.version).toBe(apiVersion);
+  });
+
+  it('rejects a token whose stored capabilities are malformed', () => {
+    const registry = JSON.parse(ctx.__props.GMAIL_SEND_TOKENS);
+    registry[Object.keys(registry)[0]].caps = 'read,draft,send,settings';
+    ctx.__props.GMAIL_SEND_TOKENS = JSON.stringify(registry);
+    expect(post(ctx, { token, action: 'profile' }).error).toBe('Unauthorized');
   });
 
   it('S7: the search scope is applied to every search', () => {

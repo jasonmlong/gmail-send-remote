@@ -26,11 +26,13 @@
 // it cannot send even if someone later arms sending for the primary token.
 // ==========================================
 
-var GMAIL_SEND_VERSION = '0.4.0';
+var GMAIL_SEND_VERSION = '0.4.1';
 
-// Every action names the capability it needs. A token without it is refused
-// before the handler runs.
-var CAPABILITIES = ['read', 'draft', 'send', 'settings'];
+function profileForRequest_(auth) {
+  var profile = getProfile_(auth);
+  profile.deploymentVersion = GMAIL_SEND_VERSION;
+  return profile;
+}
 
 /**
  * Unauthenticated probe. Deliberately says almost nothing: anyone who finds
@@ -89,7 +91,7 @@ function doPost(e) {
 
 var ACTIONS = {
   // ---- read ----
-  profile: { cap: 'read', fn: function (r, auth) { return getProfile_(auth); } },
+  profile: { cap: 'read', fn: function (r, auth) { return profileForRequest_(auth); } },
   listThreads: { cap: 'read', fn: function (r) { return listThreads_(r.query, r.max); } },
   getThread: { cap: 'read', fn: function (r) { return getThread_(r.threadId); } },
   getMessage: { cap: 'read', fn: function (r) { return getMessage_(r.messageId); } },
@@ -160,26 +162,8 @@ function authenticate_(token) {
   if (typeof token !== 'string' || !TOKEN_SHAPE.test(token)) return null;
   var rec = loadTokens_()[hashToken_(token)];
   if (!rec || rec.revoked) return null;
-  if (!rec.caps || !rec.caps.length) return null;
+  if (!Array.isArray(rec.caps) || !rec.caps.length) return null;
   return rec;
-}
-
-function allowSend_() {
-  return PropertiesService.getScriptProperties().getProperty('GMAIL_SEND_ALLOW_SEND') === '1';
-}
-
-/** Writing the Gmail signature changes every message the owner types by hand, so it is gated too. */
-function allowSettingsWrite_() {
-  return PropertiesService.getScriptProperties().getProperty('GMAIL_SEND_ALLOW_SETTINGS_WRITE') === '1';
-}
-
-function signaturePlacement_() {
-  return PropertiesService.getScriptProperties().getProperty('GMAIL_SEND_SIGNATURE_PLACEMENT') === 'before-quote' ? 'before-quote' : 'after-quote';
-}
-
-/** Optional Gmail search terms ANDed into every search, e.g. "-in:spam -in:trash newer_than:180d". */
-function searchScope_() {
-  return PropertiesService.getScriptProperties().getProperty('GMAIL_SEND_QUERY_SCOPE') || '';
 }
 
 /**

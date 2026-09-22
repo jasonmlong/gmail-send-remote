@@ -1,6 +1,6 @@
 {
   "name": "gmail-send",
-  "version": "0.1.0",
+  "version": "0.4.1",
   "license": "Apache-2.0",
   "description": "Gmail-identical drafting engine, simulator, and MCP server so an AI agent can draft emails and replies inside Gmail with real signatures and proper threading.",
   "type": "module",

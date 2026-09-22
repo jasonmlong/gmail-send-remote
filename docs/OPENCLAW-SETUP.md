@@ -167,13 +167,15 @@ delete it.
 After pulling a release that changes `src/core/` or `apps-script/`:
 
 1. Run `npm ci`, `npm run build:apps-script`, `npm test`, and `npm run typecheck` in `gmail-send-remote`.
-2. Replace `Api`, `GmailAdapter`, `Drafting`, `Setup`, and `GmailSendCore` in this OpenClaw script project with the matching repository files. Update `appsscript.json` if it changed.
+2. Replace `Api`, `GmailAdapter`, `Drafting`, `Setup`, and `GmailSendCore` in this OpenClaw script project with the matching repository files. Copy all five together so they come from the same revision. Update `appsscript.json` if it changed.
 3. If the manifest changed, run `selfTest()` and approve any new scopes. It reads and renders without saving or sending mail.
 4. Choose **Deploy > Manage deployments**, edit the existing deployment, select **New version**, and deploy it.
 5. Keep the existing URL and token. A normal code update does not require `setup()` or a new token.
-6. Run `showSettings()`, then run `npm run cli -- profile` on the configured host to verify the live `/exec` deployment and its draft-only capabilities.
+6. Run `showSettings()`, then run `npm run cli -- profile` on the configured host to verify the live `/exec` endpoint and its draft-only capabilities. Confirm `deploymentVersion` matches `GMAIL_SEND_VERSION` in `apps-script/Api.js`. This identifies the `Api` revision and the successful call exercises `GmailAdapter`; it does not replace copying all five files together.
 
 Always update this project from `gmail-send-remote`, not from the laptop's `gmail-send` checkout.
+
+If an Apps Script action reports that a name `is not defined`, such as `CAPABILITIES is not defined`, copy all five code files again and deploy a **New version**. That error usually identifies a mixed or stale Apps Script deployment. Restarting OpenClaw cannot change the code behind the `/exec` URL.
 
 ---
 
