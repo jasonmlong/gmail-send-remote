@@ -162,6 +162,19 @@ Optionally run `testDraftLatestInbox()` to put one real draft in the newest
 inbox thread, open Gmail, compare it with a reply you typed by hand, then
 delete it.
 
+### Update this Apps Script project later
+
+After pulling a release that changes `src/core/` or `apps-script/`:
+
+1. Run `npm ci`, `npm run build:apps-script`, `npm test`, and `npm run typecheck` in `gmail-send-remote`.
+2. Replace `Api`, `GmailAdapter`, `Drafting`, `Setup`, and `GmailSendCore` in this OpenClaw script project with the matching repository files. Update `appsscript.json` if it changed.
+3. If the manifest changed, run `selfTest()` and approve any new scopes. It reads and renders without saving or sending mail.
+4. Choose **Deploy > Manage deployments**, edit the existing deployment, select **New version**, and deploy it.
+5. Keep the existing URL and token. A normal code update does not require `setup()` or a new token.
+6. Run `showSettings()`, then run `npm run cli -- profile` on the configured host to verify the live `/exec` deployment and its draft-only capabilities.
+
+Always update this project from `gmail-send-remote`, not from the laptop's `gmail-send` checkout.
+
 ---
 
 ## Part 2: the OpenClaw host
@@ -177,10 +190,12 @@ delete it.
 
 ### Install
 
+This repository may be private. Configure an authorized GitHub credential or deploy key first, and stop if authentication fails.
+
 ```bash
-git clone <this repo> /srv/gmail-send
+git clone https://github.com/jasonmlong/gmail-send-remote.git /srv/gmail-send
 cd /srv/gmail-send
-npm install
+npm ci
 npm run typecheck && npm test      # offline, should be green before wiring up
 ```
 
@@ -243,9 +258,13 @@ npm run cli -- signatures list     # shows the Gmail signature, tagged [gmail]
 
 ## Part 3: register with OpenClaw
 
+Resolve the absolute Node executable first. A service may not inherit the interactive shell's `PATH`.
+
 ```bash
+NODE_BIN=$(command -v node)
+test -n "$NODE_BIN"
 openclaw mcp add gmail-send \
-  --command node \
+  --command "$NODE_BIN" \
   --arg /srv/gmail-send/node_modules/tsx/dist/cli.mjs \
   --arg /srv/gmail-send/src/mcp/server.ts \
   --cwd /srv/gmail-send \
@@ -259,7 +278,7 @@ Equivalently, in the OpenClaw config under `mcp.servers`:
   mcp: {
     servers: {
       "gmail-send": {
-        command: "node",
+        command: "/usr/bin/node",
         args: [
           "/srv/gmail-send/node_modules/tsx/dist/cli.mjs",
           "/srv/gmail-send/src/mcp/server.ts",
@@ -274,13 +293,15 @@ Equivalently, in the OpenClaw config under `mcp.servers`:
 }
 ```
 
+Replace `/usr/bin/node` with the exact output of `command -v node` on the host.
+
 Keep the URL and token in `.env` rather than repeating them in the OpenClaw
 config, so the credential lives in exactly one file.
 
-Note `node` invoking `tsx` directly rather than through `npx`: on Windows the
-npx shim truncates a multiline argument at its first newline, which silently
-cut email bodies down to the greeting. The direct form is correct everywhere,
-so it is what the docs use.
+Use the absolute Node executable to avoid service `PATH` differences. Node
+invokes `tsx` directly rather than through `npx`: on Windows the npx shim
+truncates a multiline argument at its first newline, which silently cut email
+bodies down to the greeting. The direct form is correct everywhere.
 
 Check it:
 

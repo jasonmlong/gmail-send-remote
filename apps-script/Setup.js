@@ -9,7 +9,8 @@
 // ==========================================
 
 /**
- * Run once after pasting the project in, and again after any change here.
+ * Run once after pasting the project in. Normal code updates use a new web app
+ * deployment version and do not need setup() again.
  * Creates the primary token if missing, registers it, makes sure the safety
  * switches exist in their off position, and prints what to put in .env.
  */

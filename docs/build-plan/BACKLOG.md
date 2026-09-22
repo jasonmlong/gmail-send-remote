@@ -133,6 +133,9 @@ Four independent adversarial passes before the first public deployment. Findings
 - [ ] T8.4 Create Jira project + Confluence space, fill keys, run atlassian-sync init and log this backlog (blocked: needs the project created)
 - [ ] T8.5 Initial git commit and remote
 - [ ] T8.6 GitHub Actions: typecheck + tests on push
+- [x] T8.7 Expand the root README and OpenClaw runbook with separate OpenClaw and Claude Desktop topology, first-time and update instructions for Apps Script, host setup, formatting examples, and verification steps
+- [x] T8.8 Add Apache-2.0 license files and package metadata
+- [x] T8.9 Refresh Node 20 compatible Google API and test dependencies; full audit reports zero vulnerabilities
 
 ## E11 OpenClaw deployment (remote host behind Cloudflare Zero Trust)
 
