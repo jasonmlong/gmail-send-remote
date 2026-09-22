@@ -8,7 +8,7 @@
 import { google, type gmail_v1 } from 'googleapis';
 import { base64Url } from '../core/mime.js';
 import type { Draft, Message, Signature, Thread, ThreadSummary } from '../core/types.js';
-import { DraftMetaCache } from '../draft-meta.js';
+import { DraftMetaCache, renderMatchesMessage } from '../draft-meta.js';
 import type { DraftInput, ListThreadsQuery, MailProvider, Profile } from '../provider.js';
 import type { OAuth2Client } from './auth.js';
 import { apiMessageToMessage } from './parse.js';
@@ -130,7 +130,8 @@ export class GmailProvider implements MailProvider {
     const full = d.message?.payload ? d : (await this.gmail.users.drafts.get({ userId: 'me', id, format: 'full' })).data;
     const message = apiMessageToMessage(full.message ?? {});
     const meta = this.meta.get(id);
-    return { id, threadId: message.threadId || meta?.rendered.threadId, message, rendered: meta?.rendered, raw: meta?.raw, updatedAt: meta ? new Date(meta.updatedAt) : message.date };
+    const fresh = meta ? renderMatchesMessage(meta.rendered, message) : false;
+    return { id, threadId: message.threadId || meta?.rendered.threadId, message, rendered: fresh ? meta?.rendered : undefined, raw: fresh ? meta?.raw : undefined, updatedAt: meta ? new Date(meta.updatedAt) : message.date };
   }
 
   async listDrafts(threadId?: string): Promise<Draft[]> {

@@ -7,8 +7,8 @@
  * Protocol: POST JSON {token, action, ...params} -> {ok, result | error}.
  * See docs/APPS-SCRIPT-API.md.
  */
-import type { Draft, Message, RenderedMessage, Signature, Thread, ThreadSummary } from '../core/types.js';
-import { DraftMetaCache } from '../draft-meta.js';
+import type { Draft, Message, Signature, Thread, ThreadSummary } from '../core/types.js';
+import { DraftMetaCache, renderMatchesMessage } from '../draft-meta.js';
 import type { DraftInput, ListThreadsQuery, MailProvider, Profile } from '../provider.js';
 
 export type FetchLike = (url: string, init: { method: string; headers: Record<string, string>; body: string; redirect: 'follow' }) => Promise<{ status: number; text(): Promise<string> }>;
@@ -28,34 +28,6 @@ interface WireDraft {
   threadId?: string;
   message: WireMessage;
   updatedAt: string;
-}
-
-const addressKey = (list: readonly { email: string }[] | undefined): string =>
-  (list ?? [])
-    .map((a) => a.email.trim().toLowerCase())
-    .sort()
-    .join(',');
-
-/**
- * Does the cached render still describe this draft? Compares the fields a
- * reviewer decides on - who it goes to and what it is about - rather than the
- * body, whose whitespace Gmail is entitled to normalise.
- *
- * A backend that does not echo parsed headers back (the wire-protocol test
- * double stores the raw message without parsing it) gives nothing to compare,
- * and is treated as "no information" rather than as a mismatch. Gmail always
- * returns them, so the check is live exactly where the attack is.
- */
-function renderMatchesMessage(rendered: RenderedMessage, message: Message): boolean {
-  const messageCarriesHeaders =
-    message.to.length > 0 || message.cc.length > 0 || message.bcc.length > 0 || (message.subject ?? '') !== '';
-  if (!messageCarriesHeaders) return true;
-  return (
-    addressKey(rendered.to) === addressKey(message.to) &&
-    addressKey(rendered.cc) === addressKey(message.cc) &&
-    addressKey(rendered.bcc) === addressKey(message.bcc) &&
-    (rendered.subject ?? '') === (message.subject ?? '')
-  );
 }
 
 export class AppsScriptProvider implements MailProvider {
@@ -128,7 +100,7 @@ export class AppsScriptProvider implements MailProvider {
   private reviveDraft(d: WireDraft): Draft {
     const meta = this.meta.get(d.id);
     const message = this.reviveMessage(d.message);
-    const fresh = meta ? renderMatchesMessage(meta.rendered, message) : false;
+    const fresh = meta ? renderMatchesMessage(meta.rendered, message, !!this.opts.fetchImpl) : false;
     return {
       id: d.id,
       threadId: d.threadId ?? meta?.rendered.threadId,

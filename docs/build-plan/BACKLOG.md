@@ -18,6 +18,9 @@ Legend: `[x]` done and tested in this repo, `[ ]` open, `(blocked: ...)` needs s
 - [x] T1.10 Golden tests pinned to the observed Gmail samples (`tests/compose.test.ts`, `tests/html.test.ts`, `tests/mime.test.ts`)
 - [ ] T1.11 Fidelity diff tool: render the same inputs as a real Gmail-sent message and diff HTML/text
 - [ ] T1.12 Inline image (cid) support in bodies and signatures
+- [x] T1.13 Structured Gmail formatting for MCP and Apps Script high-level drafts: emphasis, links, sizes, lists, plain-text alternative, update preservation, and offline MCP regression tests (`src/core/rich-body.ts`, `tests/rich-body.test.ts`)
+- [ ] T1.14 Compare structured formatting with a fresh Gmail web compose sample and document serialization differences
+- [x] T1.15 Adversarial security review of formatted links, direct HTTP validation, metadata limits, and stale draft updates (`docs/FORMATTING-SECURITY-REVIEW.md`)
 
 ## E2 Signatures
 

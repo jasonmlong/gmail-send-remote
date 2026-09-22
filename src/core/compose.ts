@@ -1,12 +1,13 @@
 /**
- * Renders new messages, replies and forwards into the exact HTML and plain-text
- * bodies Gmail's web compose produces. See docs/GMAIL-MARKUP.md for the
- * observed samples every branch here is modeled on.
+ * Renders new messages, replies and forwards into the observed Gmail compose
+ * structure. Structured formatting uses standard email elements; its exact
+ * serialization is not yet pinned to a fresh Gmail web sample.
  */
 import { uniqueAddresses, withoutAddresses } from './address.js';
 import { attributionHtml, attributionText, forwardHeaderHtml, forwardHeaderText } from './attribution.js';
 import { escapeHtml, htmlToText, neutralizeUnbalancedTags, textToGmailHtml } from './html.js';
 import { replyRecipients } from './recipients.js';
+import { richBodyToHtml, richBodyToText } from './rich-body.js';
 import { forwardSubject, replySubject } from './subject.js';
 import type {
   ComposeOptions,
@@ -15,6 +16,7 @@ import type {
   NewMessageInput,
   RenderedMessage,
   ReplyInput,
+  RichBodyBlock,
   Signature,
 } from './types.js';
 import { quoteText, wrapText } from './wrap.js';
@@ -96,14 +98,22 @@ function uniqueStrings(list: string[]): string[] {
   return Array.from(new Set(list.filter(Boolean)));
 }
 
+function typedBody(body: string | undefined, blocks: RichBodyBlock[] | undefined, mode: 'new' | 'reply') {
+  if (body !== undefined && blocks !== undefined) throw new Error('Pass body or bodyBlocks, not both.');
+  if (blocks !== undefined) return { html: richBodyToHtml(blocks), text: richBodyToText(blocks), bodyBlocks: blocks };
+  const plain = body ?? '';
+  return { html: textToGmailHtml(plain, mode), text: plain.trim(), bodyBlocks: undefined };
+}
+
 // ---------------------------------------------------------------------------
 
 export function composeNew(input: NewMessageInput, opts: ComposeOptions): RenderedMessage {
   const sig = opts.signature ?? null;
-  const bodyHtml = textToGmailHtml(input.body, 'new');
+  const typed = typedBody(input.body, input.bodyBlocks, 'new');
+  const bodyHtml = typed.html;
   const html = `<div dir="ltr">${bodyHtml}${sig ? `<div><br></div>${signatureBlockNew(sig)}` : ''}</div>\r\n`;
 
-  const bodyText = wrapText(input.body.trim());
+  const bodyText = wrapText(typed.text);
   const text = sig ? `${bodyText}\n\n--\n${signatureText(sig)}` : bodyText;
 
   return {
@@ -115,6 +125,7 @@ export function composeNew(input: NewMessageInput, opts: ComposeOptions): Render
     bcc: uniqueAddresses(input.bcc ?? []),
     html,
     text,
+    bodyBlocks: typed.bodyBlocks,
     attachments: input.attachments,
   };
 }
@@ -126,7 +137,8 @@ export function composeReply(original: Message, input: ReplyInput, opts: Compose
 
   const attrInner = attributionHtml(original, { ...d, linkifyEmail: opts.linkifyAttributionEmail });
   const quote = quoteBlockHtml(attrInner, originalHtmlFor(original));
-  const bodyHtml = textToGmailHtml(input.body, 'reply');
+  const typed = typedBody(input.body, input.bodyBlocks, 'reply');
+  const bodyHtml = typed.html;
 
   let html: string;
   if (sig && placement === 'before-quote') {
@@ -135,7 +147,7 @@ export function composeReply(original: Message, input: ReplyInput, opts: Compose
     html = `<div dir="ltr">${bodyHtml}</div><br>${quote}${sig ? signatureBlockAfterQuote(sig, false) : ''}\r\n`;
   }
 
-  const bodyText = wrapText(input.body.trim());
+  const bodyText = wrapText(typed.text);
   const quotedText = quoteText(originalTextFor(original, opts));
   const attrText = attributionText(original, { ...d, linkifyEmail: opts.linkifyAttributionEmail });
   let text: string;
@@ -159,6 +171,7 @@ export function composeReply(original: Message, input: ReplyInput, opts: Compose
     bcc,
     html,
     text,
+    bodyBlocks: typed.bodyBlocks,
     threadId: original.threadId,
     ...threadRefs(original),
     attachments: input.attachments,
@@ -170,10 +183,11 @@ export function composeForward(original: Message, input: ForwardInput & { forwar
   const sig = opts.signature ?? null;
   const placement = opts.signaturePlacement ?? 'after-quote';
   const d = dateOpts(opts);
-  const body = (input.body ?? '').trim();
+  const typed = typedBody(input.body, input.bodyBlocks, 'reply');
+  const body = typed.text;
 
   // The forward box behaves like the reply box: first typed line is a bare text node.
-  const bodyHtml = body ? textToGmailHtml(body, 'reply') : '';
+  const bodyHtml = input.bodyBlocks !== undefined || body ? typed.html : '';
   const header = forwardHeaderHtml(original, d);
   const forwarded = `<div class="gmail_quote gmail_quote_container"><div dir="ltr" class="gmail_attr">${header}</div><br><br>${wrapForwardedOriginal(originalHtmlFor(original), input.forwardSeed)}</div>`;
 
@@ -203,6 +217,7 @@ export function composeForward(original: Message, input: ForwardInput & { forwar
     bcc: uniqueAddresses(input.bcc ?? []),
     html,
     text,
+    bodyBlocks: typed.bodyBlocks,
     threadId: original.threadId,
     attachments: includeAttachments ? original.attachments : undefined,
     originalMessageId: original.id,

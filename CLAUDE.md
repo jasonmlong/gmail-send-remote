@@ -24,6 +24,7 @@ Optional. If you bind this repo to a tracker, keep `docs/build-plan/BACKLOG.md` 
 - Files end with `.js` in import specifiers (NodeNext resolution).
 - No em or en dashes in docs or code comments; a spaced hyphen is fine.
 - Email bodies drafted for the account owner follow `./config/style-guide.md` and must pass the linter. Replies to the user in the terminal use the normal assistant voice.
+- Use `bodyBlocks` when the owner asks for Gmail formatting. The MCP tools accept paragraph runs and real bullet or numbered lists, and `lint_body` checks their visible text and link destinations. Do not supply HTML or Markdown markers.
 - Secrets never enter git: `config/credentials.json`, `config/token.json`, `.env` are ignored.
 
 ## Before finishing a session

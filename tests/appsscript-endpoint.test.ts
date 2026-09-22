@@ -371,6 +371,30 @@ describe('Apps Script endpoint', () => {
     expect(res.result.text).toContain('On Fri, Sep 18, 2026 at 7:00 AM Dana <dana@partner.example> wrote:');
     expect(res.result.text).toContain('> Totals attached.');
   });
+
+  it('accepts structured formatting and preserves it on redraft', () => {
+    const bodyBlocks = [
+      { type: 'paragraph', runs: [{ text: 'Notable facts', bold: true, size: 'large' }] },
+      { type: 'bulletedList', items: [[{ text: 'First fact' }], [{ text: 'Second fact', italic: true }]] },
+    ];
+    const created = post(ctx, { token, action: 'draftNew', to: 'reader@example.com', subject: 'Facts', bodyBlocks, bcc: 'hidden@attacker.example' });
+    expect(created.ok).toBe(true);
+    expect(created.result.bcc).toEqual([]);
+    expect(created.result.text).toContain('• First fact\n• Second fact');
+    const revised = post(ctx, { token, action: 'redraft', draftId: created.result.draftId, subject: 'Facts, revised' });
+    expect(revised.ok).toBe(true);
+    expect(revised.result.text).toContain('• First fact\n• Second fact');
+  });
+
+  it('rejects malformed or oversized formatting before creating a draft', () => {
+    const malformed = post(ctx, { token, action: 'draftNew', to: 'reader@example.com', subject: 'Facts', bodyBlocks: [{ type: 'table', items: [] }] });
+    expect(malformed.error).toMatch(/Unknown formatted block type/);
+    const oversized = post(ctx, { token, action: 'draftNew', to: 'reader@example.com', subject: 'Facts', bodyBlocks: [
+      { type: 'paragraph', runs: [{ text: 'x'.repeat(9_000) }] },
+    ] });
+    expect(oversized.error).toMatch(/metadata is too large/);
+    expect(ctx.__userProps['gmail-send:draft:rNEW']).toBeUndefined();
+  });
   // Findings from the 2026-09-20 adversarial review (a Codex pass plus a local
   // pass), each reproduced before the fix and pinned here afterwards.
   describe('2026-09-20 review regressions', () => {
@@ -438,7 +462,8 @@ describe('Apps Script endpoint', () => {
     it('R7: a token of the wrong shape is refused before any properties read', () => {
       expect(post(ctx, { token: 'a'.repeat(63), action: 'profile' }).error).toBe('Unauthorized');
       expect(post(ctx, { token: 'z'.repeat(64), action: 'profile' }).error).toBe('Unauthorized');
-      expect(post(ctx, { token: token.toUpperCase(), action: 'profile' }).error).toBe('Unauthorized');
+      const changed = (token[0] === 'a' ? 'b' : 'a') + token.slice(1);
+      expect(post(ctx, { token: changed, action: 'profile' }).error).toBe('Unauthorized');
     });
 
     it('R8: a capability error does not enumerate what the token holds', () => {

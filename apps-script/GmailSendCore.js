@@ -58,6 +58,7 @@ var GmailSendCore = (() => {
     gmailMessageId: () => gmailMessageId,
     headerValue: () => headerValue,
     htmlToText: () => htmlToText,
+    isSafeRichLink: () => isSafeRichLink,
     linkify: () => linkify,
     looksLikeHtml: () => looksLikeHtml,
     neutralizeUnbalancedTags: () => neutralizeUnbalancedTags,
@@ -71,6 +72,8 @@ var GmailSendCore = (() => {
     replyRecipients: () => replyRecipients,
     replySubject: () => replySubject,
     rfc2822Formatter: () => rfc2822Formatter,
+    richBodyToHtml: () => richBodyToHtml,
+    richBodyToText: () => richBodyToText,
     sameEmail: () => sameEmail,
     setDateTimeFormatter: () => setDateTimeFormatter,
     setRfc2822Formatter: () => setRfc2822Formatter,
@@ -81,6 +84,7 @@ var GmailSendCore = (() => {
     uniqueAddresses: () => uniqueAddresses,
     utf8Decode: () => utf8Decode,
     utf8Encode: () => utf8Encode,
+    validateRichBody: () => validateRichBody,
     withoutAddresses: () => withoutAddresses,
     wrapForwardedOriginal: () => wrapForwardedOriginal,
     wrapLine: () => wrapLine,
@@ -446,6 +450,107 @@ var GmailSendCore = (() => {
     return /<[a-z][\s\S]*>/i.test(s);
   }
 
+  // src/core/rich-body.ts
+  var FONT_SIZES = { small: "2", normal: "3", large: "4", huge: "6" };
+  var MAX_BLOCKS = 200;
+  var MAX_ITEMS = 100;
+  var MAX_RUNS = 50;
+  var MAX_BODY_CHARS = 5e4;
+  var MAX_RUN_CHARS = 1e4;
+  var MAX_LINK_CHARS = 2048;
+  var UNSAFE_CONTROLS = /[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/;
+  function isSafeRichLink(url) {
+    if (UNSAFE_CONTROLS.test(url)) return false;
+    if (/^mailto:[\w.+-]+@[\w-]+(?:\.[\w-]+)+$/i.test(url)) return true;
+    if (!/^https?:\/\/[^\x00-\x20\x7f<>"'\\]+$/i.test(url)) return false;
+    const authority = url.match(/^https?:\/\/([^/?#]+)/i)?.[1];
+    return !!authority && !authority.includes("@");
+  }
+  function validateRichBody(value) {
+    if (!Array.isArray(value) || value.length < 1 || value.length > MAX_BLOCKS) {
+      throw new Error(`A formatted body needs 1 to ${MAX_BLOCKS} blocks.`);
+    }
+    let chars = 0;
+    const validateRuns = (runs) => {
+      if (!Array.isArray(runs) || runs.length < 1 || runs.length > MAX_RUNS) {
+        throw new Error(`A formatted paragraph or list item needs 1 to ${MAX_RUNS} text runs.`);
+      }
+      for (const run of runs) {
+        if (!run || typeof run !== "object" || Array.isArray(run)) throw new Error("A formatted run must be an object.");
+        const r = run;
+        if (Object.keys(r).some((key) => !["text", "bold", "italic", "underline", "size", "link"].includes(key))) {
+          throw new Error("Unknown formatted text property.");
+        }
+        if (typeof r.text !== "string" || !r.text || r.text.length > MAX_RUN_CHARS || UNSAFE_CONTROLS.test(r.text)) {
+          throw new Error("A formatted text run must contain one nonempty line. Use another block for a new line.");
+        }
+        chars += r.text.length;
+        if (chars > MAX_BODY_CHARS) throw new Error("Formatted body is too long.");
+        if (["bold", "italic", "underline"].some((key) => r[key] !== void 0 && typeof r[key] !== "boolean")) {
+          throw new Error("Formatted emphasis values must be boolean.");
+        }
+        if (r.size !== void 0 && (typeof r.size !== "string" || !Object.prototype.hasOwnProperty.call(FONT_SIZES, r.size))) {
+          throw new Error("Unknown formatted text size.");
+        }
+        if (r.link !== void 0 && (typeof r.link !== "string" || r.link.length > MAX_LINK_CHARS || !isSafeRichLink(r.link))) {
+          throw new Error("Formatted links must use a safe https, http, or bare mailto address.");
+        }
+        if (typeof r.link === "string") chars += r.link.length;
+        if (chars > MAX_BODY_CHARS) throw new Error("Formatted body is too long.");
+      }
+    };
+    for (const block of value) {
+      if (!block || typeof block !== "object" || Array.isArray(block)) throw new Error("A formatted block must be an object.");
+      if (block.type === "blank") {
+        if (Object.keys(block).some((key) => key !== "type")) throw new Error("Unknown blank block property.");
+      } else if (block.type === "paragraph") {
+        if (Object.keys(block).some((key) => !["type", "runs"].includes(key))) throw new Error("Unknown paragraph property.");
+        validateRuns(block.runs);
+      } else if (block.type === "bulletedList" || block.type === "numberedList") {
+        if (Object.keys(block).some((key) => !["type", "items"].includes(key))) throw new Error("Unknown list property.");
+        if (!Array.isArray(block.items) || block.items.length < 1 || block.items.length > MAX_ITEMS) {
+          throw new Error(`A formatted list needs 1 to ${MAX_ITEMS} items.`);
+        }
+        for (const item of block.items) validateRuns(item);
+      } else {
+        throw new Error("Unknown formatted block type.");
+      }
+    }
+  }
+  function runHtml(run) {
+    let html = run.link ? `<a href="${escapeAttr(run.link)}" target="_blank" rel="noopener noreferrer">${escapeHtml(run.text)}</a>` : linkify(escapeHtml(run.text));
+    if (run.bold) html = `<b>${html}</b>`;
+    if (run.italic) html = `<i>${html}</i>`;
+    if (run.underline) html = `<u>${html}</u>`;
+    if (run.size && run.size !== "normal") html = `<font size="${FONT_SIZES[run.size]}">${html}</font>`;
+    return html;
+  }
+  function runsHtml(runs) {
+    if (!runs.length) throw new Error("A formatted paragraph or list item needs at least one text run.");
+    return runs.map(runHtml).join("");
+  }
+  function richBodyToHtml(blocks) {
+    validateRichBody(blocks);
+    return blocks.map((block) => {
+      if (block.type === "paragraph") return `<div>${runsHtml(block.runs)}</div>`;
+      if (block.type === "blank") return "<div><br></div>";
+      if (!block.items.length) throw new Error("A formatted list needs at least one item.");
+      const tag = block.type === "numberedList" ? "ol" : "ul";
+      return `<${tag}>${block.items.map((item) => `<li>${runsHtml(item)}</li>`).join("")}</${tag}>`;
+    }).join("<div><br></div>");
+  }
+  function richBodyToText(blocks) {
+    validateRichBody(blocks);
+    const runText = (run) => run.link && run.link !== run.text ? `${run.text} <${run.link}>` : run.text;
+    return blocks.map((block) => {
+      if (block.type === "blank") return "";
+      if (block.type === "paragraph") return block.runs.map(runText).join("");
+      return block.items.map(
+        (item, index) => `${block.type === "numberedList" ? `${index + 1}.` : "\u2022"} ${item.map(runText).join("")}`
+      ).join("\n");
+    }).join("\n\n").trim();
+  }
+
   // src/core/attribution.ts
   var DEFAULT_TIMEZONE = "America/New_York";
   var NNBSP = "\u202F";
@@ -612,12 +717,19 @@ var GmailSendCore = (() => {
   function uniqueStrings(list) {
     return Array.from(new Set(list.filter(Boolean)));
   }
+  function typedBody(body, blocks, mode) {
+    if (body !== void 0 && blocks !== void 0) throw new Error("Pass body or bodyBlocks, not both.");
+    if (blocks !== void 0) return { html: richBodyToHtml(blocks), text: richBodyToText(blocks), bodyBlocks: blocks };
+    const plain = body ?? "";
+    return { html: textToGmailHtml(plain, mode), text: plain.trim(), bodyBlocks: void 0 };
+  }
   function composeNew(input, opts) {
     const sig = opts.signature ?? null;
-    const bodyHtml = textToGmailHtml(input.body, "new");
+    const typed = typedBody(input.body, input.bodyBlocks, "new");
+    const bodyHtml = typed.html;
     const html = `<div dir="ltr">${bodyHtml}${sig ? `<div><br></div>${signatureBlockNew(sig)}` : ""}</div>\r
 `;
-    const bodyText = wrapText(input.body.trim());
+    const bodyText = wrapText(typed.text);
     const text = sig ? `${bodyText}
 
 --
@@ -631,6 +743,7 @@ ${signatureText(sig)}` : bodyText;
       bcc: uniqueAddresses(input.bcc ?? []),
       html,
       text,
+      bodyBlocks: typed.bodyBlocks,
       attachments: input.attachments
     };
   }
@@ -640,7 +753,8 @@ ${signatureText(sig)}` : bodyText;
     const d = dateOpts(opts);
     const attrInner = attributionHtml(original, { ...d, linkifyEmail: opts.linkifyAttributionEmail });
     const quote = quoteBlockHtml(attrInner, originalHtmlFor(original));
-    const bodyHtml = textToGmailHtml(input.body, "reply");
+    const typed = typedBody(input.body, input.bodyBlocks, "reply");
+    const bodyHtml = typed.html;
     let html;
     if (sig && placement === "before-quote") {
       html = `<div dir="ltr">${bodyHtml}${signatureBlockBeforeQuote(sig)}</div><br>${quote}\r
@@ -649,7 +763,7 @@ ${signatureText(sig)}` : bodyText;
       html = `<div dir="ltr">${bodyHtml}</div><br>${quote}${sig ? signatureBlockAfterQuote(sig, false) : ""}\r
 `;
     }
-    const bodyText = wrapText(input.body.trim());
+    const bodyText = wrapText(typed.text);
     const quotedText = quoteText(originalTextFor(original, opts));
     const attrText = attributionText(original, { ...d, linkifyEmail: opts.linkifyAttributionEmail });
     let text;
@@ -685,6 +799,7 @@ ${signatureText(sig)}` : ""}`;
       bcc,
       html,
       text,
+      bodyBlocks: typed.bodyBlocks,
       threadId: original.threadId,
       ...threadRefs(original),
       attachments: input.attachments,
@@ -695,8 +810,9 @@ ${signatureText(sig)}` : ""}`;
     const sig = opts.signature ?? null;
     const placement = opts.signaturePlacement ?? "after-quote";
     const d = dateOpts(opts);
-    const body = (input.body ?? "").trim();
-    const bodyHtml = body ? textToGmailHtml(body, "reply") : "";
+    const typed = typedBody(input.body, input.bodyBlocks, "reply");
+    const body = typed.text;
+    const bodyHtml = input.bodyBlocks !== void 0 || body ? typed.html : "";
     const header = forwardHeaderHtml(original, d);
     const forwarded = `<div class="gmail_quote gmail_quote_container"><div dir="ltr" class="gmail_attr">${header}</div><br><br>${wrapForwardedOriginal(originalHtmlFor(original), input.forwardSeed)}</div>`;
     let html;
@@ -735,6 +851,7 @@ ${signatureText(sig)}` : ""}`;
       bcc: uniqueAddresses(input.bcc ?? []),
       html,
       text,
+      bodyBlocks: typed.bodyBlocks,
       threadId: original.threadId,
       attachments: includeAttachments ? original.attachments : void 0,
       originalMessageId: original.id

@@ -14,6 +14,7 @@ import type {
   NewMessageInput,
   RenderedMessage,
   ReplyInput,
+  RichBodyBlock,
   Signature,
   SignaturePlacement,
   Thread,
@@ -48,6 +49,7 @@ export type DraftReplyRequest = ReplyInput & SignatureChoice & { threadId?: stri
 export type DraftForwardRequest = ForwardInput & SignatureChoice & { messageId: string };
 export interface DraftUpdateRequest extends SignatureChoice {
   body?: string;
+  bodyBlocks?: RichBodyBlock[];
   subject?: string;
   to?: EmailAddress[];
   cc?: EmailAddress[];
@@ -175,19 +177,21 @@ export class DraftingService {
     }
     const opts = await this.composeOptions(patch.signatureId);
     const bodyOf = (r: RenderedMessage) => r.text.split(/\n\n(?:--\n|On .+? wrote:|---------- Forwarded message)/s)[0];
-    const body = patch.body ?? bodyOf(prev);
+    if (patch.body !== undefined && patch.bodyBlocks !== undefined) throw new Error('Pass body or bodyBlocks, not both.');
+    const bodyBlocks = patch.bodyBlocks ?? (patch.body === undefined ? prev.bodyBlocks : undefined);
+    const body = bodyBlocks ? undefined : patch.body ?? bodyOf(prev);
     let rendered: RenderedMessage;
     if (prev.mode === 'new') {
       rendered = composeNew(
-        { to: patch.to ?? prev.to, cc: patch.cc ?? prev.cc, bcc: patch.bcc ?? prev.bcc, subject: patch.subject ?? prev.subject, body, attachments: prev.attachments },
+        { to: patch.to ?? prev.to, cc: patch.cc ?? prev.cc, bcc: patch.bcc ?? prev.bcc, subject: patch.subject ?? prev.subject, body, bodyBlocks, attachments: prev.attachments },
         opts,
       );
     } else if (prev.mode === 'reply') {
       const original = await this.provider.getMessage(prev.originalMessageId as string);
-      rendered = composeReply(original, { body, replyAll: patch.replyAll, to: patch.to ?? prev.to, cc: patch.cc ?? prev.cc, bcc: patch.bcc ?? prev.bcc }, opts);
+      rendered = composeReply(original, { body, bodyBlocks, replyAll: patch.replyAll, to: patch.to ?? prev.to, cc: patch.cc ?? prev.cc, bcc: patch.bcc ?? prev.bcc }, opts);
     } else {
       const original = await this.provider.getMessage(prev.originalMessageId as string);
-      rendered = composeForward(original, { body, to: patch.to ?? prev.to, cc: patch.cc ?? prev.cc, bcc: patch.bcc ?? prev.bcc }, opts);
+      rendered = composeForward(original, { body, bodyBlocks, to: patch.to ?? prev.to, cc: patch.cc ?? prev.cc, bcc: patch.bcc ?? prev.bcc }, opts);
     }
     if (patch.subject && prev.mode !== 'new') rendered.subject = patch.subject;
     return this.provider.updateDraft(draftId, this.toDraftInput(rendered, opts.timeZone));

@@ -8,6 +8,7 @@ export * from './types.js';
 export * from './address.js';
 export * from './wrap.js';
 export * from './html.js';
+export * from './rich-body.js';
 export * from './attribution.js';
 export * from './subject.js';
 export * from './recipients.js';

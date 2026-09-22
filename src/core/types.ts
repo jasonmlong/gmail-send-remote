@@ -101,18 +101,35 @@ export interface ComposeOptions {
   now?: Date;
 }
 
+export interface RichTextRun {
+  text: string;
+  bold?: boolean;
+  italic?: boolean;
+  underline?: boolean;
+  size?: 'small' | 'normal' | 'large' | 'huge';
+  link?: string;
+}
+
+export type RichBodyBlock =
+  | { type: 'paragraph'; runs: RichTextRun[] }
+  | { type: 'blank' }
+  | { type: 'bulletedList' | 'numberedList'; items: RichTextRun[][] };
+
 export interface NewMessageInput {
   to: EmailAddress[];
   cc?: EmailAddress[];
   bcc?: EmailAddress[];
   subject: string;
   /** Plain text body. Paragraphs separated by blank lines, exactly as a person would type into Gmail. */
-  body: string;
+  body?: string;
+  /** Structured Gmail formatting. Use instead of body, never alongside it. */
+  bodyBlocks?: RichBodyBlock[];
   attachments?: Attachment[];
 }
 
 export interface ReplyInput {
-  body: string;
+  body?: string;
+  bodyBlocks?: RichBodyBlock[];
   replyAll?: boolean;
   /** Overrides for the computed recipients. */
   to?: EmailAddress[];
@@ -129,6 +146,7 @@ export interface ForwardInput {
   cc?: EmailAddress[];
   bcc?: EmailAddress[];
   body?: string;
+  bodyBlocks?: RichBodyBlock[];
   /** Forward the original attachments (default true). */
   includeAttachments?: boolean;
 }
@@ -142,6 +160,8 @@ export interface RenderedMessage {
   bcc: EmailAddress[];
   html: string;
   text: string;
+  /** Source blocks retained so updateDraft does not flatten formatting. */
+  bodyBlocks?: RichBodyBlock[];
   threadId?: string;
   inReplyTo?: string;
   references?: string[];

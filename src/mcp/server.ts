@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * MCP server exposing Gmail-identical drafting to an AI agent (Claude Code,
+ * MCP server exposing Gmail-style drafting to an AI agent (Claude Code,
  * Claude Desktop, or any MCP client). Runs over stdio.
  *
  *   GMAIL_SEND_PROVIDER=sim   -> offline simulator (default, safe)
@@ -13,6 +13,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod';
 import { parseAddressList } from '../core/address.js';
 import { htmlToText } from '../core/html.js';
+import { isSafeRichLink, richBodyToText } from '../core/rich-body.js';
 import type { Draft, EmailAddress, Message } from '../core/types.js';
 import { writePrivateFile } from '../private-file.js';
 import { createRuntime, type Runtime } from '../runtime.js';
@@ -43,6 +44,28 @@ const toAddrs = (v?: string | string[]): EmailAddress[] | undefined => {
   const raw = Array.isArray(v) ? v.join(', ') : v;
   return parseAddressList(raw);
 };
+
+const richRun = z.object({
+  text: z.string().min(1).max(10_000).refine((s) => !/[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/.test(s), 'Control and direction characters are not allowed in formatted runs'),
+  bold: z.boolean().optional(),
+  italic: z.boolean().optional(),
+  underline: z.boolean().optional(),
+  size: z.enum(['small', 'normal', 'large', 'huge']).optional(),
+  link: z.string().max(2_048).refine(isSafeRichLink, 'Use an http or https URL without credentials, or a bare mailto address').optional(),
+}).strict();
+const richRuns = z.array(richRun).min(1).max(50);
+const bodyBlocksSchema = z.array(z.discriminatedUnion('type', [
+  z.object({ type: z.literal('paragraph'), runs: richRuns }).strict(),
+  z.object({ type: z.literal('blank') }).strict(),
+  z.object({ type: z.literal('bulletedList'), items: z.array(richRuns).min(1).max(100) }).strict(),
+  z.object({ type: z.literal('numberedList'), items: z.array(richRuns).min(1).max(100) }).strict(),
+])).min(1).max(200).optional().describe('Structured Gmail formatting. Use instead of body. Paragraphs are separated automatically. Each run can have bold, italic, underline, size, or link. Lists become real Gmail bullet or number lists. Never include HTML.');
+
+function bodyText(body?: string, bodyBlocks?: z.infer<NonNullable<typeof bodyBlocksSchema>>): string {
+  if (body !== undefined && bodyBlocks !== undefined) throw new Error('Pass body or bodyBlocks, not both.');
+  if (body === undefined && bodyBlocks === undefined) throw new Error('Pass body or bodyBlocks.');
+  return bodyBlocks ? richBodyToText(bodyBlocks) : body ?? '';
+}
 
 function msgSummary(m: Message, includeHtml = false) {
   return {
@@ -132,7 +155,7 @@ async function writePreview(rt: Runtime, threadId: string | undefined, drafts: D
  * which every client passes through. Claude Desktop in particular loads no
  * local skill file, so these two channels are the only ones available there.
  */
-const SERVER_INSTRUCTIONS = `Writes Gmail drafts that are identical to mail typed in Gmail's own compose box.
+const SERVER_INSTRUCTIONS = `Writes Gmail drafts using the observed Gmail compose structure. Structured formatting uses standard HTML elements and has not yet been compared byte for byte with a fresh Gmail web sample.
 
 You draft, a person sends. Nothing here delivers mail. Never say a draft was sent.
 
@@ -140,9 +163,9 @@ Before writing any email body:
 1. get_style_guide, once per conversation. It returns the account owner's real writing guide. Do not write from an impression of how people write email.
 2. get_thread, to read what you are answering. Read the whole conversation, not only the last message.
 
-Write the body as plain text: greeting, paragraphs separated by blank lines, closing line. No signature, no name sign-off, no HTML, no quoted text and no "On ... wrote:" line. All of that is generated for you, and adding your own produces duplicates.
+Use body for plain text. When the user asks for formatting, use bodyBlocks instead: paragraph runs can be bold, italic, underlined, linked or sized; bulletedList and numberedList create real lists. No HTML or Markdown markers. Do not include a signature, name sign-off, quoted text or "On ... wrote:" line. Those are generated.
 
-Run lint_body and fix the errors before creating the draft.
+Run lint_body with body or bodyBlocks and fix the errors before creating the draft.
 
 After creating a draft, read the response and tell the user who it is addressed to. If "unfamiliarRecipients" is present, say so explicitly and ask before going further: an inbound message can carry a Reply-To that quietly redirects a reply to someone else.
 
@@ -315,7 +338,7 @@ export async function buildServer(rt: Runtime): Promise<McpServer> {
   );
 
   const bodyDesc =
-    'Plain text body exactly as the person would type it: greeting, then paragraphs separated by blank lines, then a closing line. NO name sign-off, NO signature, NO HTML, NO quoted text and NO "On ... wrote:" line. The signature, the quote and the attribution are generated, so anything you add here is a duplicate. Call get_style_guide first and match that voice.';
+    'Plain text body. For real Gmail bold, italic, underline, larger text, links or bullet/number lists, omit body and pass bodyBlocks instead. NO name sign-off, signature, HTML, quoted text or "On ... wrote:" line. Call get_style_guide first.';
   const afterDesc =
     ' Nothing is sent. Read the response back to the user: say who it is addressed to, and if "unfamiliarRecipients" is present, name it and ask before continuing.';
 
@@ -323,12 +346,13 @@ export async function buildServer(rt: Runtime): Promise<McpServer> {
     'draft_reply',
     {
       description:
-        'Create a Gmail-identical reply draft in the conversation: quoted original with the "On <date> <person> wrote:" attribution, the account signature, correct To/Cc, subject and threading headers. Replies to the latest message unless messageId is given.' +
+        'Create a reply draft in the conversation: quoted original with the "On <date> <person> wrote:" attribution, the account signature, correct To/Cc, subject and threading headers. Use bodyBlocks for real Gmail-style formatting. Replies to the latest message unless messageId is given.' +
         afterDesc,
       inputSchema: {
         threadId: z.string().optional(),
         messageId: z.string().optional(),
-        body: z.string().describe(bodyDesc),
+        body: z.string().optional().describe(bodyDesc),
+        bodyBlocks: bodyBlocksSchema,
         replyAll: z.boolean().optional(),
         to: addrList.describe('Override computed To'),
         cc: addrList.describe('Override computed Cc'),
@@ -339,8 +363,9 @@ export async function buildServer(rt: Runtime): Promise<McpServer> {
     },
     async (a) => {
       try {
-        const draft = await drafting.draftReply({ threadId: a.threadId, messageId: a.messageId, body: a.body, replyAll: a.replyAll, to: toAddrs(a.to), cc: toAddrs(a.cc), addCc: toAddrs(a.addCc), signatureId: a.signatureId });
-        const lint = a.lint === false ? undefined : lintDraft(a.body, loadRules(cfg.styleConfigPath));
+        const lintText = bodyText(a.body, a.bodyBlocks);
+        const draft = await drafting.draftReply({ threadId: a.threadId, messageId: a.messageId, body: a.body, bodyBlocks: a.bodyBlocks, replyAll: a.replyAll, to: toAddrs(a.to), cc: toAddrs(a.cc), addCc: toAddrs(a.addCc), signatureId: a.signatureId });
+        const lint = a.lint === false ? undefined : lintDraft(lintText, loadRules(cfg.styleConfigPath));
         return ok({ ...draftSummary(draft), unfamiliarRecipients: await unfamiliarRecipients(rt, draft), lint });
       } catch (e) {
         return fail(e);
@@ -352,13 +377,14 @@ export async function buildServer(rt: Runtime): Promise<McpServer> {
     'draft_new',
     {
       description:
-        'Create a new-message draft with the account signature, in the exact HTML structure Gmail compose produces. Use draft_reply instead when the message belongs in an existing conversation, because starting a new one breaks the thread.' + afterDesc,
-      inputSchema: { to: addrList, cc: addrList, subject: z.string(), body: z.string().describe(bodyDesc), signatureId: z.string().optional(), lint: z.boolean().optional() },
+        'Create a new-message draft with the account signature. Plain bodies use the observed Gmail compose structure; bodyBlocks adds standard email formatting. Use draft_reply when the message belongs in an existing conversation.' + afterDesc,
+      inputSchema: { to: addrList, cc: addrList, subject: z.string(), body: z.string().optional().describe(bodyDesc), bodyBlocks: bodyBlocksSchema, signatureId: z.string().optional(), lint: z.boolean().optional() },
     },
     async (a) => {
       try {
-        const draft = await drafting.draftNew({ to: toAddrs(a.to) ?? [], cc: toAddrs(a.cc), subject: a.subject, body: a.body, signatureId: a.signatureId });
-        const lint = a.lint === false ? undefined : lintDraft(a.body, loadRules(cfg.styleConfigPath));
+        const lintText = bodyText(a.body, a.bodyBlocks);
+        const draft = await drafting.draftNew({ to: toAddrs(a.to) ?? [], cc: toAddrs(a.cc), subject: a.subject, body: a.body, bodyBlocks: a.bodyBlocks, signatureId: a.signatureId });
+        const lint = a.lint === false ? undefined : lintDraft(lintText, loadRules(cfg.styleConfigPath));
         return ok({ ...draftSummary(draft), lint });
       } catch (e) {
         return fail(e);
@@ -371,12 +397,14 @@ export async function buildServer(rt: Runtime): Promise<McpServer> {
     {
       description:
         'Create a forward draft with the "---------- Forwarded message ---------" header block, the original content and attachments, and the signature. Forwarding sends a whole conversation to someone outside it, so confirm the recipient with the user first.' + afterDesc,
-      inputSchema: { messageId: z.string(), to: addrList, cc: addrList, body: z.string().optional().describe('Optional note above the forwarded message'), signatureId: z.string().optional(), includeAttachments: z.boolean().optional() },
+      inputSchema: { messageId: z.string(), to: addrList, cc: addrList, body: z.string().optional().describe('Optional plain text note above the forwarded message'), bodyBlocks: bodyBlocksSchema, signatureId: z.string().optional(), includeAttachments: z.boolean().optional() },
     },
     async (a) => {
       try {
-        const draft = await drafting.draftForward({ messageId: a.messageId, to: toAddrs(a.to) ?? [], cc: toAddrs(a.cc), body: a.body, signatureId: a.signatureId, includeAttachments: a.includeAttachments });
-        return ok({ ...draftSummary(draft), unfamiliarRecipients: await unfamiliarRecipients(rt, draft) });
+        if (a.body !== undefined && a.bodyBlocks !== undefined) throw new Error('Pass body or bodyBlocks, not both.');
+        const draft = await drafting.draftForward({ messageId: a.messageId, to: toAddrs(a.to) ?? [], cc: toAddrs(a.cc), body: a.body, bodyBlocks: a.bodyBlocks, signatureId: a.signatureId, includeAttachments: a.includeAttachments });
+        const lint = a.body === undefined && a.bodyBlocks === undefined ? undefined : lintDraft(bodyText(a.body, a.bodyBlocks), loadRules(cfg.styleConfigPath));
+        return ok({ ...draftSummary(draft), unfamiliarRecipients: await unfamiliarRecipients(rt, draft), lint });
       } catch (e) {
         return fail(e);
       }
@@ -387,13 +415,14 @@ export async function buildServer(rt: Runtime): Promise<McpServer> {
     'update_draft',
     {
       description:
-        'Re-render an existing draft with a new body. The Gmail structure (quote, attribution, signature) is rebuilt, so only pass the typed body. Recipients cannot be changed here on purpose: re-addressing a draft a human has already read would send approved words to a different person. To change who it goes to, delete the draft and write a new one.',
-      inputSchema: { draftId: z.string(), body: z.string().optional(), subject: z.string().optional(), replyAll: z.boolean().optional(), signatureId: z.string().optional() },
+        'Re-render an existing draft with a new plain body or structured bodyBlocks. The quote, attribution and signature are rebuilt. A subject-only update preserves prior formatting. Recipients cannot be changed here on purpose: re-addressing a draft a human has already read would send approved words to a different person. To change who it goes to, delete the draft and write a new one.',
+      inputSchema: { draftId: z.string(), body: z.string().optional().describe(bodyDesc), bodyBlocks: bodyBlocksSchema, subject: z.string().optional(), replyAll: z.boolean().optional(), signatureId: z.string().optional() },
     },
     async (a) => {
       try {
-        const d = await drafting.updateDraft(a.draftId, { body: a.body, subject: a.subject, replyAll: a.replyAll, signatureId: a.signatureId });
-        return ok({ ...draftSummary(d), unfamiliarRecipients: await unfamiliarRecipients(rt, d) });
+        const d = await drafting.updateDraft(a.draftId, { body: a.body, bodyBlocks: a.bodyBlocks, subject: a.subject, replyAll: a.replyAll, signatureId: a.signatureId });
+        const lint = a.body === undefined && a.bodyBlocks === undefined ? undefined : lintDraft(bodyText(a.body, a.bodyBlocks), loadRules(cfg.styleConfigPath));
+        return ok({ ...draftSummary(d), unfamiliarRecipients: await unfamiliarRecipients(rt, d), lint });
       } catch (e) {
         return fail(e);
       }
@@ -478,9 +507,9 @@ export async function buildServer(rt: Runtime): Promise<McpServer> {
     }
   });
 
-  server.registerTool('lint_body', { description: 'Check a body against the style rules before drafting.', inputSchema: { body: z.string() } }, async ({ body }) => {
+  server.registerTool('lint_body', { description: 'Check the visible body words against the style rules before drafting. Pass body or bodyBlocks.', inputSchema: { body: z.string().optional(), bodyBlocks: bodyBlocksSchema } }, async ({ body, bodyBlocks }) => {
     try {
-      return ok(lintDraft(body, loadRules(cfg.styleConfigPath)));
+      return ok(lintDraft(bodyText(body, bodyBlocks), loadRules(cfg.styleConfigPath)));
     } catch (e) {
       return fail(e);
     }

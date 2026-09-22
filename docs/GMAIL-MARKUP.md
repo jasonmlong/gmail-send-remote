@@ -2,6 +2,8 @@
 
 What Gmail's web compose actually emits, captured from three messages Sam sent in September 2026 (a new message to a contractor, a reply to a vendor, a forward of a scheduling thread) plus one message sent from the Gmail mobile app. Content below is replaced with placeholders; structure, attributes, whitespace and ordering are verbatim. Every rule here is implemented in `src/core` and pinned by `tests/compose.test.ts`.
 
+Structured formatting added later uses standard HTML elements (`<b>`, `<i>`, `<u>`, `<font>`, `<ul>`, `<ol>`, `<li>`, `<a>`) and a plain-text alternative that includes link destinations. It is tested in `tests/rich-body.test.ts`, but these exact formatted tags have not been compared with a fresh Gmail web compose sample. The golden claims below apply to the original plain-text samples.
+
 ## Common facts
 
 - Text nodes are escaped as `&amp;`, `&lt;`, `&gt;` and `&#39;` for apostrophes. Double quotes are not escaped.

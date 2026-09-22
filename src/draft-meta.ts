@@ -1,6 +1,23 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import type { RenderedMessage } from './core/types.js';
+import type { Message, RenderedMessage } from './core/types.js';
+
+const addressKey = (list: readonly { email: string }[] | undefined): string =>
+  (list ?? []).map((a) => a.email.trim().toLowerCase()).sort().join(',');
+
+/** A cached render must still match the headers Gmail currently holds. */
+export function renderMatchesMessage(rendered: RenderedMessage, message: Message, allowHeaderlessTestDouble = false): boolean {
+  const messageCarriesHeaders =
+    message.to.length > 0 || message.cc.length > 0 || message.bcc.length > 0 || (message.subject ?? '') !== '';
+  if (!messageCarriesHeaders) return allowHeaderlessTestDouble;
+  return (
+    rendered.from.email.trim().toLowerCase() === message.from.email.trim().toLowerCase() &&
+    addressKey(rendered.to) === addressKey(message.to) &&
+    addressKey(rendered.cc) === addressKey(message.cc) &&
+    addressKey(rendered.bcc) === addressKey(message.bcc) &&
+    (rendered.subject ?? '') === (message.subject ?? '')
+  );
+}
 
 export interface DraftMetaEntry {
   rendered: RenderedMessage;

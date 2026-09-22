@@ -70,8 +70,8 @@ npm run build:apps-script      # regenerate apps-script/GmailSendCore.js after a
 
 ## Working rules for agents
 
-- Before drafting for the account owner: call `get_style_guide`, read the thread with `get_thread`, write the body as plain text (greeting, paragraphs, closing, no signature, no name), run `lint_body`, then `draft_reply` / `draft_new` / `draft_forward`. Review the returned text. Use `preview_draft` when a human needs to eyeball it.
-- Never hand-edit rendered HTML. Change the typed body and let `update_draft` re-render.
+- Before drafting for the account owner: call `get_style_guide`, read the thread with `get_thread`, then write the body as plain `body` or structured `bodyBlocks` for bold, italic, underline, links, sizes, and real lists. Pass one body field, no signature or name. Run `lint_body` with that field, then `draft_reply` / `draft_new` / `draft_forward`. Review the returned text. Use `preview_draft` when a human needs to eyeball it.
+- Never hand-edit rendered HTML or add Markdown markers. Change `body` or `bodyBlocks` and let `update_draft` re-render.
 - When you change anything under `src/core`, run `npm test`. If Gmail's real output differs from a test, the test is updated only with a fresh sample from a real Gmail send, documented in `docs/GMAIL-MARKUP.md`.
 - Keep the provider interface stable; add capabilities to both providers or make them optional.
 - Work tracking: keep `docs/build-plan/BACKLOG.md` current in the same change that does the work. Optional skills for mirroring it to an issue tracker live in `.claude/skills`.

@@ -239,17 +239,17 @@ When drafting for the account owner, the order matters:
    Do not write from an impression of how people write email.
 2. `get_thread` to read what is being answered, the whole conversation and not
    only the last message.
-3. Write the body as plain text: greeting, paragraphs separated by blank lines,
+3. Write the body as plain text, or use `bodyBlocks` for standard formatting: greeting, paragraphs separated by blank lines,
    closing line. No signature, no name sign-off, no HTML, no quoted text and no
    `On ... wrote:` line. All of that is generated. Adding your own produces
    duplicates.
-4. `lint_body`, and fix the errors before creating the draft.
+4. `lint_body` with the same `body` or `bodyBlocks`, and fix the errors before creating the draft.
 5. `draft_reply` / `draft_new` / `draft_forward`.
 6. Read the response back and say who the draft is addressed to. If
    `unfamiliarRecipients` is present, say so explicitly and ask before going
    further.
 
-To change a draft, change the typed body and let `update_draft` re-render it.
+To change a draft, change `body` or `bodyBlocks` and let `update_draft` re-render it. A subject-only update keeps existing formatting.
 Never hand-edit rendered HTML.
 
 ## Standing rules
