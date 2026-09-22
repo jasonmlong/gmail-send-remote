@@ -83,7 +83,7 @@ password:
 ```bash
 git clone https://github.com/jasonmlong/gmail-send-remote.git /srv/gmail-send
 cd /srv/gmail-send
-npm install
+npm ci --include=dev
 npm run typecheck && npm test
 ```
 

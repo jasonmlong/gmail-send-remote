@@ -28,7 +28,7 @@ Requirements on the host:
 
 ```bash
 git clone <repo url> gmail-send && cd gmail-send
-npm install
+npm ci --include=dev
 npm run typecheck && npm test      # all offline, should be green before you wire anything up
 ```
 

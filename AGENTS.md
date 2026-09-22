@@ -59,7 +59,7 @@ config/          signatures.json (committed), style.json, credentials/token (ign
 ## Commands
 
 ```
-npm install
+npm ci --include=dev
 npm test                       # all offline, must stay green
 npm run typecheck
 npm run cli -- sim demo --open # seed + reply draft + preview page
@@ -74,6 +74,7 @@ npm run build:apps-script      # regenerate apps-script/GmailSendCore.js after a
 - Never hand-edit rendered HTML or add Markdown markers. Change `body` or `bodyBlocks` and let `update_draft` re-render.
 - When you change anything under `src/core`, run `npm test`. If Gmail's real output differs from a test, the test is updated only with a fresh sample from a real Gmail send, documented in `docs/GMAIL-MARKUP.md`.
 - When any file under `apps-script/` changes, increment `GMAIL_SEND_VERSION` in `apps-script/Api.js` and keep `package.json` plus the MCP server version in `src/mcp/server.ts` aligned. This makes the authenticated profile useful when checking which `Api` revision is deployed.
+- Keep packages on a runtime launch path, including MCP client configuration, in `dependencies`. Validation installs must use `npm ci --include=dev` so `NODE_ENV=production` does not omit TypeScript or Vitest. Use `npm install` when deliberately adding or updating a dependency.
 - Keep the provider interface stable; add capabilities to both providers or make them optional.
 - Work tracking: keep `docs/build-plan/BACKLOG.md` current in the same change that does the work. Optional skills for mirroring it to an issue tracker live in `.claude/skills`.
 - Commit messages: conventional style (`feat(core): ...`, `fix(sim): ...`).

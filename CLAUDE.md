@@ -33,3 +33,4 @@ Optional. If you bind this repo to a tracker, keep `docs/build-plan/BACKLOG.md` 
 2. `docs/build-plan/BACKLOG.md` reflects what changed.
 3. Any bundle in `apps-script/` rebuilt if `src/core` changed.
 4. Any change under `apps-script/` increments `GMAIL_SEND_VERSION` in `apps-script/Api.js`, with `package.json` and the MCP server version kept in sync.
+5. Packages on runtime launch paths remain production dependencies; use `npm ci --include=dev` before validation.

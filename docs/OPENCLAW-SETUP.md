@@ -33,7 +33,7 @@ minutes.
 On this machine, in this repository:
 
 ```bash
-npm install
+npm ci --include=dev
 npm run build:apps-script
 npm test
 ```
@@ -166,7 +166,7 @@ delete it.
 
 After pulling a release that changes `src/core/` or `apps-script/`:
 
-1. Run `npm ci`, `npm run build:apps-script`, `npm test`, and `npm run typecheck` in `gmail-send-remote`.
+1. Run `npm ci --include=dev`, `npm run build:apps-script`, `npm test`, and `npm run typecheck` in `gmail-send-remote`.
 2. Replace `Api`, `GmailAdapter`, `Drafting`, `Setup`, and `GmailSendCore` in this OpenClaw script project with the matching repository files. Copy all five together so they come from the same revision. Update `appsscript.json` if it changed.
 3. If the manifest changed, run `selfTest()` and approve any new scopes. It reads and renders without saving or sending mail.
 4. Choose **Deploy > Manage deployments**, edit the existing deployment, select **New version**, and deploy it.
@@ -197,7 +197,7 @@ This repository may be private. Configure an authorized GitHub credential or dep
 ```bash
 git clone https://github.com/jasonmlong/gmail-send-remote.git /srv/gmail-send
 cd /srv/gmail-send
-npm ci
+npm ci --include=dev
 npm run typecheck && npm test      # offline, should be green before wiring up
 ```
 
@@ -211,6 +211,12 @@ nano .env      # paste the /exec URL and the openclaw token
 
 The server finds its own `.env` relative to its own file, so the working
 directory does not matter.
+
+`tsx` is a production dependency because OpenClaw invokes it directly to run
+the MCP server. The install command includes development dependencies because
+this setup also runs TypeScript and Vitest, even when the host exports
+`NODE_ENV=production`. Keep npm lifecycle scripts enabled so `esbuild` can
+prepare its executable for the host platform.
 
 `GMAIL_SEND_STYLE_GUIDE` points at `./config/style-guide.md`, which is in the
 repository, so the clone carries the writing voice with it. This is the thing

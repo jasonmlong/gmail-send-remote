@@ -47,7 +47,7 @@ Structured formatting uses standard email HTML elements. Exact byte-for-byte ser
 The Apps Script bundle can be built on any development machine with Node.js 20 or newer and npm. The OpenClaw host also needs outbound HTTPS access to `script.google.com` and `script.googleusercontent.com`.
 
 ```bash
-npm ci
+npm ci --include=dev
 npm test
 npm run typecheck
 npm run cli -- sim demo --open
@@ -62,7 +62,7 @@ The simulator uses synthetic mail and does not contact Gmail.
 1. Build and test the bundle from this repository:
 
    ```bash
-   npm ci
+   npm ci --include=dev
    npm run build:apps-script
    npm test
    npm run typecheck
@@ -104,7 +104,7 @@ Use this after pulling a new release or changing `src/core/` or `apps-script/`.
 1. Build and test from `gmail-send-remote`:
 
    ```bash
-   npm ci
+   npm ci --include=dev
    npm run build:apps-script
    npm test
    npm run typecheck
@@ -131,7 +131,7 @@ This repository may be private. Configure the host with an authorized GitHub cre
 ```bash
 git clone https://github.com/jasonmlong/gmail-send-remote.git /srv/gmail-send
 cd /srv/gmail-send
-npm ci
+npm ci --include=dev
 npm run typecheck
 npm test
 cp .env.openclaw.example .env
@@ -194,7 +194,7 @@ A draft-only installation should expose 17 tools and no `send_draft` tool.
 ```bash
 cd /srv/gmail-send
 git pull --ff-only
-npm ci
+npm ci --include=dev
 npm run typecheck
 npm test
 ```
@@ -202,6 +202,8 @@ npm test
 Restart or reload the OpenClaw MCP process using the service method configured on that host. Confirm the new schemas with `openclaw mcp doctor gmail-send --probe`. Pulling the repository does not make an already running MCP process reload its code.
 
 The host and Apps Script are separate release surfaces. Update both from this repository when a release changes the shared renderer or Apps Script endpoint.
+
+`tsx` is a production dependency because OpenClaw launches `src/mcp/server.ts` through it. The commands above include development dependencies because they also run TypeScript and Vitest. A production-only `npm ci --omit=dev` installation still contains the MCP launcher, but it cannot run the repository's typecheck or test suite. Keep npm lifecycle scripts enabled so `esbuild` can prepare its executable for the host platform.
 
 ## Use structured Gmail formatting
 
